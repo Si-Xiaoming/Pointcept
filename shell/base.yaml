@@ -1,0 +1,13 @@
+channels:
+  - nvidia/label/cuda-11.3.0
+  - pytorch
+  - pyg
+  - conda-forge
+  - defaults
+
+dependencies:
+  - blas-devel
+  - cuda
+  - pip
+  - python 3.8.* 
+

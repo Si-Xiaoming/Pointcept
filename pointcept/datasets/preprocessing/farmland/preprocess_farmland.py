@@ -137,52 +137,14 @@ def parse_lidar(dataset_root, output_root, grid_size):
 
 
 
-def main_process():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--dataset_root", help="Path to Stanford3dDataset_v1.2 dataset",default=r'/home/cm/share/SMS/dataset/navarra'
-    )
-    parser.add_argument(
-        "--output_root",
-
-        help="Output path where area folders will be located",default=r'/home/cm/share/SMS/dataset/navarra'
-    )
-    parser.add_argument(
-        "--num_workers", default=1, type=int, help="Num workers for preprocessing."
-    )
-    parser.add_argument(
-        "--grid_size", default=0.1, type=float, help="grid size in meters."
-    )
-    args = parser.parse_args()
-
-    print("Loading LAS information ...")
-
-    parse_lidar(args.dataset_root, args.output_root, args.grid_size)
 
 
-def test_single():
-    raw_path = r'/home/cm/share/SMS/dataset/navarra/raw/train/las_cam_607_4740_C_Pamplona_EPSG25830_2020.laz'
-    grid_size = 0.1
-    split = 'train'
-    output_path = r'/home/cm/share/SMS/dataset/navarra/process'
-    execuate_las(raw_path, grid_size, split, output_path)
 
-def test_all():
-    raw_path = r'/home/cm/share/SMS/dataset/navarra/raw'
-    grid_size = 0.1
-    split = 'train'
-    output_path = r'/home/cm/share/SMS/dataset/navarra/process-0.1'
-
-    for root, dirs, files in os.walk(raw_path):
-        for file in files:
-            if file.endswith('.laz'):
-                file_path = os.path.join(root, file)
-                execuate_las(file_path, grid_size, split, output_path)
 
 def main_preprocess():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset_root", help="Path to Stanford3dDataset_v1.2 dataset", default=r'/home/cm/share/SMS/dataset/navarra'
+        "--dataset_root", help="Path to save ", default=r'/home/cm/share/SMS/dataset/navarra'
     )
     parser.add_argument(
         "--output_root",
@@ -202,6 +164,5 @@ def main_preprocess():
     parse_lidar(args.dataset_root, args.output_root, args.grid_size)
 
 if __name__ == "__main__":
-
     # main_process()
-    test_all()
+    main_preprocess()
