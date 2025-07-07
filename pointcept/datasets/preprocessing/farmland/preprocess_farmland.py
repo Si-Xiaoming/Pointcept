@@ -144,12 +144,12 @@ def parse_lidar(dataset_root, output_root, grid_size):
 def main_preprocess():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset_root", help="Path to save ", default=r'/home/cm/share/SMS/dataset/navarra'
+        "--dataset_root", help="Path where raw datasets are located.", default=r''
     )
     parser.add_argument(
         "--output_root",
 
-        help="Output path where area folders will be located", default=r'/home/cm/share/SMS/dataset/navarra/raw'
+        help="Output path where area folders will be located.", default=r''
     )
     parser.add_argument(
         "--num_workers", default=1, type=int, help="Num workers for preprocessing."
