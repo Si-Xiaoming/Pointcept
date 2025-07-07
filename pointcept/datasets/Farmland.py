@@ -13,7 +13,7 @@ from .transform import Compose, TRANSFORMS
 @DATASETS.register_module()
 class FarmlandDataset(Dataset):
     lock = None
-    def __init__(self, transform=None,test_mode=False, split='train', sample_method = 'ball_sample'):
+    def __init__(self,num_points_per_step, transform=None,test_mode=False, split='train', sample_method = 'ball_sample'):
         super().__init__()
         self.inputs = []
         self.segments = []
@@ -29,7 +29,7 @@ class FarmlandDataset(Dataset):
         self.transform = Compose(transform)
 
         # todo
-        self.num_points_per_step = 0
+        self.num_points_per_step = num_points_per_step
         self.sample_method = sample_method
         self.test_mode = test_mode
         self.split = split

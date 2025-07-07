@@ -68,7 +68,7 @@ scheduler = dict(
 param_dicts = [dict(keyword="block", lr=0.0006)]
 
 # dataset settings
-dataset_type = "ZeroDataset"
+dataset_type = "FarmlandDataset"
 data_root = "data/s3dis" #
 
 data = dict(
