@@ -91,7 +91,7 @@ def normalize_attributes(array: np.array, min_value: float, max_value: float, me
     value = np.clip(value, 0.0, 1.0)
     return np.expand_dims(value, 1)
 
-def parse_lidar(dataset_root, output_root, grid_size):
+def parse_lidar(dataset_root, grid_size):
     print("Reading lidar files...")
     classes = [
         'ground',
@@ -102,12 +102,14 @@ def parse_lidar(dataset_root, output_root, grid_size):
     class2label = {cls: i for i, cls in enumerate(classes)}
 
     source_dir = os.path.join(dataset_root, 'raw')
-    save_path = os.path.join(output_root, 'process')
+    if not os.path.exists(source_dir):
+        os.makedirs(source_dir)
+    save_path = os.path.join(dataset_root, 'processed')
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
     '''
-        处理文件夹结构：
+        dataset_root：
         - raw
           -- train
           --- *.laz
@@ -116,6 +118,8 @@ def parse_lidar(dataset_root, output_root, grid_size):
           -- test
           --- *.laz
         root_path 是 raw 文件夹的路径
+        - tile
+        - processed
         '''
     # 获取 'raw' 目录下的第二级文件夹名称
     split = []
@@ -146,11 +150,8 @@ def main_preprocess():
     parser.add_argument(
         "--dataset_root", help="Path where raw datasets are located.", default=r''
     )
-    parser.add_argument(
-        "--output_root",
+    
 
-        help="Output path where area folders will be located.", default=r''
-    )
     parser.add_argument(
         "--num_workers", default=1, type=int, help="Num workers for preprocessing."
     )

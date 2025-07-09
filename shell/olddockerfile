@@ -1,0 +1,121 @@
+# 1. 设置基础镜像
+# 使用 ARG 定义可变的 PyTorch, CUDA, 和 CUDNN 版本
+ARG TORCH_VERSION=2.5.0
+ARG CUDA_VERSION=12.4
+ARG CUDNN_VERSION=9
+# 根据版本构建基础镜像标签
+FROM pytorch/pytorch:${TORCH_VERSION}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel
+
+# 2. 设置构建过程中的环境变量
+# 设置代理 (如果构建环境需要)
+ENV HTTP_PROXY=http://127.0.0.1:10809
+ENV HTTPS_PROXY=http://127.0.0.1:10809
+# 设置为非交互式，防止 apt-get 等命令卡住
+ENV DEBIAN_FRONTEND=noninteractive
+# 为Swin3D, FlashAttention等库设置目标CUDA架构
+ENV TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0"
+
+# 3. 系统配置和依赖安装
+RUN \
+    # 修复 nvidia-key 可能出现的公钥错误
+    rm -f /etc/apt/sources.list.d/*.list && \
+    # 更新并安装系统包，包括新增的 ssh, curl, ping
+    apt-get update --no-install-recommends && \
+    apt-get install -y --no-install-recommends \
+    git \
+    wget \
+    tmux \
+    vim \
+    zsh \
+    build-essential \
+    cmake \
+    ninja-build \
+    libopenblas-dev \
+    libsparsehash-dev \
+    openssh-server \
+    curl \
+    iputils-ping && \
+    # 清理apt缓存，减小镜像体积
+    apt-get autoremove -y && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# 4. 配置 SSH 服务
+# 创建ssh服务运行所需目录
+RUN mkdir -p /var/run/sshd
+# 设置root用户密码为'root'。!!极不安全，请仅用于本地测试!!
+RUN echo 'root:root' | chpasswd
+# 使用heredoc语法直接写入sshd_config配置文件
+RUN cat > /etc/ssh/sshd_config <<- EOM
+Include /etc/ssh/sshd_config.d/*.conf
+Port 22
+PermitRootLogin yes
+PasswordAuthentication yes
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+UsePAM yes
+X11Forwarding yes
+PrintMotd no
+AcceptEnv LANG LC_*
+Subsystem       sftp    /usr/lib/openssh/sftp-server
+EOM
+
+# 5. 安装 Pointcept 所需的 Conda 环境
+RUN conda install -y -c conda-forge \
+    h5py \
+    pyyaml \
+    tensorboard \
+    tensorboardx \
+    wandb \
+    yapf \
+    addict \
+    einops \
+    scipy \
+    plyfile \
+    termcolor \
+    matplotlib \
+    black \
+    open3d \
+    pandas \
+    scikit-learn \
+    pdal \
+    python-pdal \
+    scipy \
+
+
+# 6. 安装核心的 Python 包 (Pip)
+# 从ARG接收版本信息，用于拼接URL
+ARG TORCH_VERSION
+ARG CUDA_VERSION
+# 在一个RUN指令中执行多个pip安装命令
+RUN \
+    CUDA_VERSION_NO_DOT=$(echo ${CUDA_VERSION} | tr -d '.') && \
+    pip install --upgrade pip && \
+    pip install timm && \
+    # 从特定URL安装与torch和cuda版本匹配的包
+    pip install torch_geometric torch_scatter torch_sparse torch_cluster -f https://data.pyg.org/whl/torch-${TORCH_VERSION}+cu${CUDA_VERSION_NO_DOT}.html && \
+    pip install spconv-cu${CUDA_VERSION_NO_DOT}
+
+# 7. 从 Git 仓库安装其他 Python 依赖
+RUN \
+    pip install git+https://github.com/octree-nn/ocnn-pytorch.git && \
+    pip install ftfy regex tqdm && \
+    pip install git+https://github.com/openai/CLIP.git
+
+# 8. 编译并安装需要特定CUDA架构的库
+RUN pip install -U git+https://github.com/microsoft/Swin3D.git -v
+RUN pip install git+https://github.com/Dao-AILab/flash-attention.git --no-build-isolation
+
+# 9. 克隆 Pointcept 仓库并编译其内部库
+RUN git clone https://github.com/Pointcept/Pointcept.git /Pointcept
+WORKDIR /Pointcept
+RUN \
+    pip install libs/pointops -v && \
+    pip install libs/pointgroup_ops -v
+
+# 10. 容器运行时配置
+# 暴露 SSH 端口
+EXPOSE 22
+
+# 设置容器启动时执行的默认命令，以前台模式运行 SSH 服务
+CMD ["/usr/sbin/sshd", "-D"]

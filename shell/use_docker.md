@@ -29,3 +29,5 @@ service ssh start
 ```
 RUN apt-get update && apt-get install -y openssh-server
 CMD ["/usr/sbin/sshd", "-D"]
+
+docker exec -it /bin/bash ID
