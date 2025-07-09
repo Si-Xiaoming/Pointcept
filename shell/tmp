@@ -1,0 +1,83 @@
+# using ARG to define PyTorch, CUDA, 和 CUDNN versions
+ARG TORCH_VERSION=2.5.0
+ARG CUDA_VERSION=12.4
+ARG CUDNN_VERSION=9
+FROM pytorch/pytorch:${TORCH_VERSION}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel
+
+# Fix nvidia-key error issue (NO_PUBKEY A4B469963BF863CC)
+RUN rm /etc/apt/sources.list.d/*.list
+
+# Setting proxy variables
+
+
+# Installing apt packages
+
+
+RUN export DEBIAN_FRONTEND=noninteractive \
+    && apt-get update --allow-insecure-repositories \
+    && apt-get -y update --no-install-recommends \
+    && apt-get -y install --no-install-recommends \
+      git wget tmux vim zsh build-essential cmake ninja-build libopenblas-dev libsparsehash-dev \
+      libgdal-dev gdal-bin python3-gdal openssh-server curl iputils-ping \
+    && apt-get autoremove -y \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && export DEBIAN_FRONTEND=dialog
+
+# Create pointcept conda environment
+RUN conda create -n pointcept python=3.8 -y
+
+# Make RUN commands use the new environment
+SHELL ["conda", "run", "-n", "pointcept", "/bin/bash", "-c"]
+
+# Install basic conda packages in pointcept environment
+RUN conda install h5py pyyaml tensorboard tensorboardx wandb yapf addict einops scipy plyfile termcolor matplotlib black open3d -c conda-forge -y
+
+# Install PDAL and related packages
+RUN conda install -c conda-forge pdal python-pdal=3.2.3 -y
+
+# Install pip packages
+RUN pip install --upgrade pip
+RUN pip install timm
+RUN pip install torch-geometric
+RUN pip install torch_scatter torch_sparse torch_cluster -f https://data.pyg.org/whl/torch-${TORCH_VERSION}+cu${CUDA_VERSION_NO_DOT}.html
+RUN pip install spconv-cu${CUDA_VERSION_NO_DOT}
+RUN pip install git+https://github.com/octree-nn/ocnn-pytorch.git
+RUN pip install ftfy regex tqdm
+RUN pip install git+https://github.com/openai/CLIP.git
+
+# Install additional required packages
+RUN pip install argparse scikit-learn scipy opencv-python gdal
+
+# Build swin3d
+RUN TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0" pip install -U git+https://github.com/microsoft/Swin3D.git -v
+
+# Build FlashAttention2
+RUN TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0" pip install git+https://github.com/Dao-AILab/flash-attention.git
+
+# Build pointops
+RUN git clone https://github.com/Pointcept/Pointcept.git
+RUN TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0" pip install Pointcept/libs/pointops -v
+
+# Build pointgroup_ops
+RUN TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0" pip install Pointcept/libs/pointgroup_ops -v
+
+# Set the conda environment as default
+ENV CONDA_DEFAULT_ENV=pointcept
+ENV PATH="/opt/conda/envs/pointcept/bin:$PATH"
+
+# Create SSH directory and set permissions
+RUN mkdir -p /var/run/sshd && \
+    echo 'root:root' | chpasswd && \
+    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication no/' /etc/ssh/sshd_config
+
+
+
+# Set working directory
+WORKDIR /workspace
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D"]
+# Activate pointcept environment on container start
+RUN echo "conda activate pointcept" >> ~/.bashrc

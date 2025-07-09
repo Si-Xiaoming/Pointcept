@@ -2,6 +2,7 @@
 ```shell
 docker build -t image_name -f Dockerfile .
 ```
+docker build -t ptcept:01 -f Dockerfile -build_arg HTTPS_PROXY=127.0.0.1:10809 HTTP_PROXY=127.0.0.1:10809 
 
 docker 创建容器
 ```shell
