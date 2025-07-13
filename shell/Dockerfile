@@ -6,7 +6,16 @@ ARG CUDA_VERSION=12.4
 ARG CUDNN_VERSION=9
 ARG CUDA_VERSION_NO_DOT=124
 
+
+
 FROM pytorch/pytorch:${TORCH_VERSION}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel
+
+# ========================================================================================
+# Set environment variables for CUDA
+# ========================================================================================
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=$CUDA_HOME/bin:$PATH
+ENV LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 
 # ========================================================================================
 # Set proxy variables (if needed)
@@ -21,10 +30,9 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get update \
     && apt-get -y install --no-install-recommends \
       git wget tmux vim zsh build-essential cmake ninja-build libopenblas-dev libsparsehash-dev \
-      libgdal-dev gdal-bin python3-gdal openssh-server curl iputils-ping \
+      libgdal-dev gdal-bin python3-gdal openssh-server curl iputils-ping nano \
     && apt-get autoremove -y \
     && apt-get clean -y \
-    && apt-get nano -y \
     && rm -rf /var/lib/apt/lists/* \
     && export DEBIAN_FRONTEND=dialog
 
@@ -78,6 +86,3 @@ RUN pip install libs/pointops
 RUN pip install libs/pointgroup_ops
 
 WORKDIR /workspace
-
-
-
