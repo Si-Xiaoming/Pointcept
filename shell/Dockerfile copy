@@ -1,0 +1,127 @@
+# ========================================================================================
+# 使用 ARG 定义 PyTorch, CUDA, 和 CUDNN 版本
+# ========================================================================================
+ARG TORCH_VERSION=2.5.0
+ARG CUDA_VERSION=12.4
+ARG CUDNN_VERSION=9
+# 修正原 Dockerfile 中的未定义变量错误
+ARG CUDA_VERSION_NO_DOT=124
+
+FROM pytorch/pytorch:${TORCH_VERSION}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel
+
+# ========================================================================================
+# APT & System Configuration (使用清华源)
+# ========================================================================================
+# 替换为清华大学 TUNA apt 镜像源 (适用于基础镜像 Ubuntu 22.04)
+RUN rm /etc/apt/sources.list.d/*.list \
+    && echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy main restricted universe multiverse" > /etc/apt/sources.list \
+    && echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list \
+    && echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-backports main restricted universe multiverse" >> /etc/apt/sources.list \
+    && echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list
+
+# 设置代理变量 (按需填写)
+# ENV http_proxy="http://your.proxy.address:port"
+# ENV https_proxy="http://your.proxy.address:port"
+
+# 安装 apt 软件包
+RUN export DEBIAN_FRONTEND=noninteractive \
+    && apt-get update \
+    && apt-get -y install --no-install-recommends \
+      git wget tmux vim zsh build-essential cmake ninja-build libopenblas-dev libsparsehash-dev \
+      libgdal-dev gdal-bin python3-gdal openssh-server curl iputils-ping \
+    && apt-get autoremove -y \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && export DEBIAN_FRONTEND=dialog
+# 配置 SSH 服务
+RUN mkdir -p /var/run/sshd && \
+    echo 'root:root' | chpasswd && \
+    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication no/' /etc/ssh/sshd_config
+# 暴露端口并启动 SSH 服务
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D"]
+# ========================================================================================
+# Conda Environment Configuration (使用清华源)
+# ========================================================================================
+# 配置 Conda 使用清华大学 TUNA 镜像源
+RUN conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge  \
+    && conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main  \
+    && conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free  \
+    && conda config --set show_channel_urls yes
+
+# 创建 pointcept conda 环境
+# RUN conda create -n pointcept python=3.9 -y
+
+# 使后续的 RUN 命令默认使用新环境
+# SHELL ["conda", "run", "-n", "pointcept", "/bin/bash", "-c"]
+
+# ========================================================================================
+# Package Installation (使用清华源)
+# ========================================================================================
+# 安装基础 conda 包 (已配置清华源, 无需-c参数)
+RUN conda install h5py pyyaml tensorboard tensorboardx wandb yapf addict einops scipy plyfile termcolor matplotlib black open3d -y
+
+# 安装 PDAL 相关包
+RUN conda install pdal python-pdal=3.2.3 -y
+
+# 升级 pip 并配置清华源
+RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple \
+    && pip config set global.index-url https://mirrors.aliyun.com/pypi/simple \
+    && pip config set global.extral-index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 安装 pip 包
+RUN pip install timm -i https://mirrors.aliyun.com/pypi/simple/
+# 从清华 PyG 镜像源安装
+RUN pip install torch_geometric torch_scatter torch_sparse torch_cluster -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip install spconv -i https://mirrors.aliyun.com/pypi/simple/
+# 从 GitHub 镜像克隆并安装
+
+RUN pip install ftfy regex tqdm -i https://mirrors.aliyun.com/pypi/simple/
+
+# 安装其他依赖包
+RUN pip install argparse scikit-learn scipy opencv-python -i https://mirrors.aliyun.com/pypi/simple/
+
+# ========================================================================================
+# Build Custom Libraries (使用清华源)
+# ========================================================================================
+# 定义编译架构
+ENV TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0"
+
+COPY 3rdparty/CLIP /tmp/CLIP
+COPY 3rdparty/ocnn-pytorch /tmp/ocnn-pytorch
+COPY 3rdparty/Pointcept /tmp/pointcept
+COPY 3rdparty/Swin3D /tmp/Swin3D
+COPY 3rdparty/flash-attention /tmp/flash-attention
+
+RUN pip install /tmp/CLIP
+RUN pip install /tmp/ocnn-pytorch
+# RUN pip install -U /tmp/Swin3D -v
+# RUN pip install /tmp/flash-attention
+
+
+# Build pointops
+# RUN git clone https://github.com/Pointcept/Pointcept.git
+RUN pip install /tmp/pointcept/libs/pointops -v
+
+# Build pointgroup_ops
+RUN pip install /tmp/pointcept/libs/pointgroup_ops -v
+RUN pip install -U /tmp/Swin3D -v
+
+# ========================================================================================
+# Final Environment Setup
+# ========================================================================================
+# 设置默认 conda 环境
+ENV CONDA_DEFAULT_ENV=pointcept
+ENV PATH="/opt/conda/envs/pointcept/bin:$PATH"
+
+
+
+# 设置工作目录
+WORKDIR /workspace
+
+
+
+# 容器启动时自动激活 conda 环境
+RUN echo "conda activate pointcept" >> ~/.bashrc

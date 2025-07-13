@@ -296,7 +296,7 @@ class Sonata(PointModel):
         mask_ratio = self.mask_ratio
 
         # Grouping points with grid patch
-        min_coord = torch_scatter.segment_coo(coord, batch, reduce="min")
+        min_coord = torch_scatter.segment_coo(coord, batch, reduce="min") 
         grid_coord = ((coord - min_coord[batch]) // mask_size).int()
         grid_coord = torch.cat([batch.unsqueeze(-1), grid_coord], dim=-1)
         unique, point_cluster, counts = torch.unique(
@@ -413,7 +413,7 @@ class Sonata(PointModel):
             result_dict = dict(loss=[])
             # teacher backbone forward (shared with mask and unmask)
             global_point_ = self.teacher.backbone(global_point)
-            global_point_ = self.up_cast(global_point_)
+            global_point_ = self.up_cast(global_point_) # 
             global_feat = global_point_.feat
 
         if self.mask_loss_weight > 0 or self.roll_mask_loss_weight > 0:
