@@ -20,7 +20,7 @@ def execuate_las(raw_path, grid_size,split, output_path):
     has_intensity = has_color = True
     pipeline = pdal.Pipeline()
     pipeline |= pdal.Reader.las(filename=raw_path)
-    pipeline |= pdal.Filter.stats(dimensions="Intensity,Red,Blue,Green")
+    pipeline |= pdal.Filter.stats(dimensions="Intensity")
     pipeline |= pdal.Filter.voxelcenternearestneighbor(cell=grid_size)
     # pipeline |= pdal.Filter.range(limits="Classification[2:6], Classification[8:8]")
 
@@ -52,17 +52,12 @@ def execuate_las(raw_path, grid_size,split, output_path):
 
 
     stats = metadata['filters.stats']['statistic'][0]
-    r = normalize_attributes(arrays['Red'], 0.0, (float)(stats['maximum']), stats['average'],
-                                  stats['stddev'])
-    stats = metadata['filters.stats']['statistic'][2]
-    g = normalize_attributes(arrays['Green'], 0.0, (float)(stats['maximum']), stats['average'],
-                                  stats['stddev'])
-    stats = metadata['filters.stats']['statistic'][3]
-    b = normalize_attributes(arrays['Blue'], 0.0, (float)(stats['maximum']), stats['average'],
+    intensity = normalize_attributes(arrays['Intensity'], 0.0, (float)(stats['maximum']), stats['average'],
                                   stats['stddev'])
 
 
-    color = np.concatenate([r, g, b], axis=-1)
+
+
     save_path = os.path.join(output_path, split, scene_name)
     os.makedirs(save_path, exist_ok=True)
 
@@ -72,7 +67,7 @@ def execuate_las(raw_path, grid_size,split, output_path):
         pickle.dump(kdtree, f)
 
     np.save(os.path.join(save_path, "coord.npy"), pos.astype(np.float32))
-    np.save(os.path.join(save_path, "color.npy"), color.astype(np.float32))
+    np.save(os.path.join(save_path, "color.npy"), intensity.astype(np.float32))
     np.save(os.path.join(save_path, "segment.npy"), y.astype(np.int16))
     # np.save(os.path.join(save_path, "instance.npy"), room_instance_gt.astype(np.int16))
 

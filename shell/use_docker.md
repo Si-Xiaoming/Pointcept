@@ -9,21 +9,45 @@ docker build -t image_name -f Dockerfile .
 >
 > docker build -t ptcept:01 -f Dockerfile .
 
+
+
+# 创建容器
+
 创建好image后，需要创建对应的运行容器
+
 ```shell
+#  交互式终端模式（-i  保持输入，-t分配伪终端）
 docker run -it --gpus all -m 30g --cpus 8 ^
-    -v %CD%:/workspace ^
-    -p 8000:22 ^
-    cept:02
+    -v %CD%:/workspace ^    -v 将该终端的路径挂载到docker容器中/workspace的路径下
+    -p 8000:22 ^			-p 将docker容器的22端口映射到宿主机的8000端口
+    cept:02					该容器是依据cept:02这个image创建
+
 ```
 
->交互式终端模式（-i  保持输入，-t分配伪终端）
->
->-v 将该终端的路径挂载到docker容器中/workspace的路径下
->
->-p 将docker容器的22端口映射到宿主机的8000端口
->
->该容器是依据cept:02这个image创建
+>docker run -it --gpus all -m 30g --cpus 8 -v %CD%:/workspace -p 8000:22 ptcept:01
+
+# 容器打包成镜像
+
+```shell
+docker commit -a "shummer" # author
+	-m "Generate a image from ptcept container"   # message
+	1ca2e18a3ec2e6a503586750f00ae4a2d45557c0e9e3be78c082787a2513d059  #container ID
+	ptcept:02  # image name
+```
+
+# 容器打包成tar文件
+
+```shell
+docker save -o ptcept_02.tar ptcept:02
+```
+
+
+
+```shell
+docker load -i ptcept_02.tar
+```
+
+
 
 
 
@@ -67,3 +91,10 @@ RUN apt-get update && apt-get install -y openssh-server
 CMD ["/usr/sbin/sshd", "-D"]
 
 docker exec -it /bin/bash ID
+
+
+
+# Reference
+
+[PyCharm+Docker：打造最舒适的深度学习炼丹炉 - 知乎](https://zhuanlan.zhihu.com/p/52827335)
+

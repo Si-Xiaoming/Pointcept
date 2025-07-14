@@ -61,11 +61,11 @@ RUN mamba install pdal python-pdal=3.2.3 -y
 # Install pip packages
 # ========================================================================================
 RUN pip install --upgrade pip 
-RUN pip install timm
+RUN pip install timm numpy==1.26.4
 RUN pip install torch_geometric torch_scatter torch_sparse torch_cluster  -f https://data.pyg.org/whl/torch-${TORCH_VERSION}+cu${CUDA_VERSION_NO_DOT}.html 
 RUN pip install spconv-cu124
-RUN pip install ftfy regex tqdm
-RUN pip install argparse scikit-learn scipy opencv-python
+RUN pip install ftfy regex tqdm omegaconf
+RUN pip install argparse scikit-learn scipy
 
 # ========================================================================================
 # Install additional dependencies
