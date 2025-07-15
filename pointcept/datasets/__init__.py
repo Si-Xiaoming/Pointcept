@@ -22,3 +22,7 @@ from .shapenet_part import ShapeNetPartDataset
 
 # dataloader
 from .dataloader import MultiDatasetDataloader
+
+# LAS data
+from .Farmland import FarmlandDataset
+from .opengf import OpenGFDataset

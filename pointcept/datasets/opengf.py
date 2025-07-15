@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 from .transform import Compose, TRANSFORMS
 
 @DATASETS.register_module()
-class FarmlandDataset(Dataset):
+class OpenGFDataset(Dataset):
     lock = None
     def __init__(self,num_points_per_step, transform=None,test_mode=False, split='train', sample_method = 'ball_sample'):
         super().__init__()

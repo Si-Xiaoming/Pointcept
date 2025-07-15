@@ -1,7 +1,7 @@
 #!/bin/sh
 
-cd $(dirname $(dirname "$0")) || exit
-ROOT_DIR=$(pwd)
+cd $(dirname $(dirname "$0")) || exit # go to the root directory of the project
+ROOT_DIR=$(pwd) # save the root directory
 PYTHON=python
 
 TRAIN_CODE=train.py
@@ -16,7 +16,7 @@ NUM_MACHINE=1
 DIST_URL="auto"
 
 
-while getopts "p:d:c:n:w:g:m:r:" opt; do
+while getopts "p:d:c:n:w:g:m:r:" opt; do # parse command line options
   case $opt in
     p)
       PYTHON=$OPTARG
@@ -48,7 +48,7 @@ while getopts "p:d:c:n:w:g:m:r:" opt; do
   esac
 done
 
-if [ "${NUM_GPU}" = 'None' ]
+if [ "${NUM_GPU}" = 'None' ] # set NUM_GPU if not provided
 then
   NUM_GPU=`$PYTHON -c 'import torch; print(torch.cuda.device_count())'`
 fi

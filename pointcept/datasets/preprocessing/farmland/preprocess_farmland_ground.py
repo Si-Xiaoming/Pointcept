@@ -61,10 +61,7 @@ def execuate_las(raw_path, grid_size,split, output_path):
     save_path = os.path.join(output_path, split, scene_name)
     os.makedirs(save_path, exist_ok=True)
 
-    kdtree = KDTree(pos)
-    kdt_path = os.path.join(save_path, 'kdtree.pkl')
-    with open(kdt_path, 'wb') as f:
-        pickle.dump(kdtree, f)
+
 
     np.save(os.path.join(save_path, "coord.npy"), pos.astype(np.float32))
     np.save(os.path.join(save_path, "color.npy"), intensity.astype(np.float32))
@@ -140,12 +137,6 @@ def parse_lidar(dataset_root, grid_size):
                 # 调用处理函数，并传入 split
                 execuate_las(laz_file_path, grid_size, folder, save_path)
 
-
-
-
-
-
-
 def main_preprocess():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -168,3 +159,4 @@ def main_preprocess():
 if __name__ == "__main__":
     # main_process()
     main_preprocess()
+
