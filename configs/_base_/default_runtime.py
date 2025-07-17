@@ -9,7 +9,7 @@ num_worker = 16  # total worker in all gpu
 batch_size = 16  # total batch size in all gpu
 batch_size_val = None  # auto adapt to bs 1 for each gpu
 batch_size_test = None  # auto adapt to bs 1 for each gpu
-epoch = 100  # total epoch, data loop = epoch // eval_epoch
+epoch = 10  # total epoch, data loop = epoch // eval_epoch
 eval_epoch = 10  # sche total eval & checkpoint epoch
 clip_grad = None  # disable with None, enable with a float
 

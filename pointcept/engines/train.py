@@ -55,7 +55,7 @@ class TrainerBase:
         self.writer: SummaryWriter
 
     def register_hooks(self, hooks) -> None:
-        hooks = build_hooks(hooks)
+        hooks = build_hooks(hooks)  # NO ISSUES
         for h in hooks:
             assert isinstance(h, HookBase)
             # To avoid circular reference, hooks and trainer cannot own each other.

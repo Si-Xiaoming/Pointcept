@@ -1,13 +1,13 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom settings
-batch_size = 4
-num_workers = 1
+batch_size = 1
+num_workers = 0 # shm
 mix_prob = 0.8 #
 empty_cache = False
 enable_amp = True
 sample_method = "ball_sample"
-num_points_per_step = 60000
+num_points_per_step = 600
 
 # model settings
 model = dict(
@@ -16,7 +16,7 @@ model = dict(
     backbone_out_channels=64,
     backbone=dict(
         type="PT-v3m1",
-        in_channels=6,
+        in_channels=3,
         order=["z", "z-trans", "hilbert", "hilbert-trans"],
         stride=(2, 2, 2, 2),
         enc_depths=(2, 2, 2, 6, 2),
@@ -94,9 +94,6 @@ data = dict(
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
             # dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
-            dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
-            dict(type="ChromaticTranslation", p=0.95, ratio=0.05),
-            dict(type="ChromaticJitter", p=0.95, std=0.05),
             # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
@@ -105,7 +102,7 @@ data = dict(
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "color", "segment"),
+                # keys=("coord", "color", "segment"),
             ),
             dict(type="SphereCrop", sample_rate=0.6, mode="random"),
             dict(type="SphereCrop", point_max=num_points_per_step, mode="random"),
@@ -113,11 +110,11 @@ data = dict(
             dict(type="NormalizeColor"),
             # dict(type="ShufflePoint"),
             dict(type="ToTensor"),
-            dict(
-                type="Collect",
-                keys=("coord", "grid_coord", "segment"),
-                feat_keys=("coord", "color"),
-            ),
+            # dict(
+            #     type="Collect",
+            #     keys=("coord", "grid_coord", "segment"),
+            #     feat_keys=("coord"),
+            # ),
         ],
         test_mode = False,
     ),
@@ -137,23 +134,23 @@ data = dict(
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "color", "segment"),
+                # keys=("coord", "color", "segment"),
             ),
             dict(type="CenterShift", apply_z=False),
             dict(type="NormalizeColor"),
             dict(type="ToTensor"),
-            dict(
-                type="Collect",
-                keys=(
-                    "coord",
-                    "grid_coord",
-                    "origin_coord",
-                    "segment",
-                    "origin_segment",
-                ),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
-                feat_keys=("coord", "color"),
-            ),
+            # dict(
+            #     type="Collect",
+            #     keys=(
+            #         "coord",
+            #         "grid_coord",
+            #         "origin_coord",
+            #         "segment",
+            #         "origin_segment",
+            #     ),
+            #     offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
+            #     feat_keys=("coord"),
+            # ),
         ],
         test_mode=False,
     ),
@@ -172,18 +169,18 @@ test=dict(
                 grid_size=0.2,
                 hash_type="fnv",
                 mode="test",
-                keys=("coord", "color"),
+                # keys=("coord", "color"),
                 return_grid_coord=True,
             ),
             crop=None,
             post_transform=[
                 dict(type="CenterShift", apply_z=False),
                 dict(type="ToTensor"),
-                dict(
-                    type="Collect",
-                    keys=("coord", "grid_coord", "index"),
-                    feat_keys=("coord", "color"),
-                ),
+                # dict(
+                #     type="Collect",
+                #     keys=("coord", "grid_coord", "index"),
+                #     feat_keys=("coord"),
+                # ),
             ],
             aug_transform=[
                 [dict(type="RandomScale", scale=[0.9, 0.9])],
