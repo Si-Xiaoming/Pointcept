@@ -35,7 +35,7 @@ docker commit -a "shummer" # author
 	ptcept:02  # image name
 ```
 
-# 容器打包成tar文件
+# 镜像打包成tar文件
 
 ```shell
 docker save -o ptcept_02.tar ptcept:02

@@ -21,7 +21,7 @@ class OpenGFDataset(DefaultDataset):
             loop=loop
         )
 
-    
+
     def get_data_name(self, idx):
         data_name = os.path.split(
             self.data_list[idx % len(self.data_list)]
