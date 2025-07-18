@@ -7,16 +7,16 @@ mix_prob = 0.8 #
 empty_cache = False
 enable_amp = True
 sample_method = "ball_sample"
-num_points_per_step = 600
+num_points_per_step = 30000
 
 # model settings
 model = dict(
     type="DefaultSegmentorV2",
-    num_classes=2,
+    num_classes=4,
     backbone_out_channels=64,
     backbone=dict(
         type="PT-v3m1",
-        in_channels=3,
+        in_channels=6,
         order=["z", "z-trans", "hilbert", "hilbert-trans"],
         stride=(2, 2, 2, 2),
         enc_depths=(2, 2, 2, 6, 2),
@@ -45,7 +45,7 @@ model = dict(
         pdnorm_decouple=True,
         pdnorm_adaptive=False,
         pdnorm_affine=True,
-        pdnorm_conditions=("OpenGF", "S3DIS", "Structured3D"),
+        pdnorm_conditions=("OpenGF", "S3DIS", "Structured3D", "Navarra"),
     ),
     criteria=[
         dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1),
@@ -54,7 +54,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 10
+epoch = 100
 optimizer = dict(type="AdamW", lr=0.006, weight_decay=0.05)
 scheduler = dict(
     type="OneCycleLR",
@@ -67,15 +67,17 @@ scheduler = dict(
 param_dicts = [dict(keyword="block", lr=0.0006)]
 
 # dataset settings
-dataset_type = "OpenGFDataset"
-data_root = "/datasets/data/"
+dataset_type = "NavarraDataset"
+data_root = "/datasets/navarra-test/"
 
 data = dict(
-    num_classes = 2,
+    num_classes = 4,
     ignore_index = -1,
     names = [
-        "non-ground",
-        "ground"
+        "ground",
+        "vegetation",
+        "building",
+        "others",
     ],
     train = dict(
         type = dataset_type,
@@ -96,9 +98,14 @@ data = dict(
             # dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
             # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
+
+            dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
+            dict(type="ChromaticTranslation", p=0.95, ratio=0.05),
+            dict(type="ChromaticJitter", p=0.95, std=0.05),
+
             dict(
                 type="GridSample",
-                grid_size=0.2,
+                grid_size=2,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -110,11 +117,11 @@ data = dict(
             dict(type="NormalizeColor"),
             # dict(type="ShufflePoint"),
             dict(type="ToTensor"),
-            # dict(
-            #     type="Collect",
-            #     keys=("coord", "grid_coord", "segment"),
-            #     feat_keys="coord",
-            # ),
+            dict(
+                type="Collect",
+                keys=("coord", "grid_coord", "segment"),
+                feat_keys=("coord", "color"),
+            ),
         ],
         test_mode = False,
     ),
@@ -130,7 +137,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.2,
+                grid_size=2,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -139,18 +146,18 @@ data = dict(
             dict(type="CenterShift", apply_z=False),
             dict(type="NormalizeColor"),
             dict(type="ToTensor"),
-            # dict(
-            #     type="Collect",
-            #     keys=(
-            #         "coord",
-            #         "grid_coord",
-            #         "origin_coord",
-            #         "segment",
-            #         "origin_segment",
-            #     ),
-            #     offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
-            #     feat_keys="coord",
-            # ),
+            dict(
+                type="Collect",
+                keys=(
+                    "coord",
+                    "grid_coord",
+                    "origin_coord",
+                    "segment",
+                    "origin_segment",
+                ),
+                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
+                feat_keys=("coord", "color"),
+            ),
         ],
         test_mode=False,
     ),
@@ -166,7 +173,7 @@ test=dict(
         test_cfg=dict(
             voxelize=dict(
                 type="GridSample",
-                grid_size=0.2,
+                grid_size=2,
                 hash_type="fnv",
                 mode="test",
                 # keys=("coord", "color"),
@@ -176,11 +183,11 @@ test=dict(
             post_transform=[
                 dict(type="CenterShift", apply_z=False),
                 dict(type="ToTensor"),
-                # dict(
-                #     type="Collect",
-                #     keys=("coord", "grid_coord", "index"),
-                #     feat_keys="coord",
-                # ),
+                dict(
+                    type="Collect",
+                    keys=("coord", "grid_coord", "index"),
+                    feat_keys=("coord", "color"),
+                ),
             ],
             aug_transform=[
                 [dict(type="RandomScale", scale=[0.9, 0.9])],

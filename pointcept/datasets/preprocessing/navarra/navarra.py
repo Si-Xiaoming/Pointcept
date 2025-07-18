@@ -20,15 +20,15 @@ def execuate_las(raw_path, grid_size, split, output_path):
     has_intensity = has_color = True
     pipeline = pdal.Pipeline()
     pipeline |= pdal.Reader.las(filename=raw_path)
-    pipeline |= pdal.Filter.stats(dimensions="Intensity")
+    pipeline |= pdal.Filter.stats(dimensions="Intensity,Red,Blue,Green")
     pipeline |= pdal.Filter.voxelcenternearestneighbor(cell=grid_size)
-
-
+    pipeline |= pdal.Filter.range(limits="Classification[2:6], Classification[8:8]")
     pipeline |= pdal.Filter.assign(value=[
-        f"Classification = 0 WHERE Classification != 2",
-        f"Classification = 1 WHERE Classification == 2"
+        f"Classification = 0 WHERE Classification == 2",
+        f"Classification = 1 WHERE ((Classification >= 3) && (Classification <= 5))",
+        f"Classification = 2 WHERE Classification == 6",
+        f"Classification = 3 WHERE Classification == 8"
     ])
-
     count = pipeline.execute()
     arrays = pipeline.arrays[0]
     metadata = pipeline.metadata['metadata']
@@ -43,15 +43,22 @@ def execuate_las(raw_path, grid_size, split, output_path):
     ], axis=-1).astype(np.float32)
     y = arrays['Classification'].reshape(-1, 1)
 
-    stats = metadata['filters.stats']['statistic'][0]
-    intensity = normalize_attributes(arrays['Intensity'], 0.0, (float)(stats['maximum']), stats['average'],
-                                     stats['stddev'])
+    stats = metadata['filters.stats']['statistic'][1]
+    r = normalize_attributes(arrays['Red'], 0.0, (float)(stats['maximum']), stats['average'],
+                                  stats['stddev'])
+    stats = metadata['filters.stats']['statistic'][2]
+    g = normalize_attributes(arrays['Green'], 0.0, (float)(stats['maximum']), stats['average'],
+                                  stats['stddev'])
+    stats = metadata['filters.stats']['statistic'][3]
+    b = normalize_attributes(arrays['Blue'], 0.0, (float)(stats['maximum']), stats['average'],
+                                  stats['stddev'])
+    color = np.concatenate([r, g, b], axis=-1)
 
     save_path = os.path.join(output_path, split, scene_name)
     os.makedirs(save_path, exist_ok=True)
 
     np.save(os.path.join(save_path, "coord.npy"), pos.astype(np.float32))
-    # np.save(os.path.join(save_path, "color.npy"), intensity.astype(np.float32))
+    np.save(os.path.join(save_path, "color.npy"), color.astype(np.float32))
     np.save(os.path.join(save_path, "segment.npy"), y.astype(np.int16))
     # np.save(os.path.join(save_path, "instance.npy"), room_instance_gt.astype(np.int16))
 
@@ -122,7 +129,7 @@ def parse_lidar(dataset_root, grid_size):
 def main_preprocess():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset_root", help="Path where raw datasets are located.", default=r'/datasets/data/'
+        "--dataset_root", help="Path where raw datasets are located.", default=r'/datasets/navarra-test/'
     )
 
     parser.add_argument(
