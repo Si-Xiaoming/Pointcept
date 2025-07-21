@@ -22,7 +22,7 @@ def execuate_las(raw_path, grid_size, split, output_path):
     pipeline |= pdal.Reader.las(filename=raw_path)
     pipeline |= pdal.Filter.stats(dimensions="Intensity,Red,Blue,Green")
     pipeline |= pdal.Filter.voxelcenternearestneighbor(cell=grid_size)
-    pipeline |= pdal.Filter.range(limits="Classification[2:6], Classification[8:8]")
+    #pipeline |= pdal.Filter.range(limits="Classification[2:6], Classification[8:8]")
     pipeline |= pdal.Filter.assign(value=[
         f"Classification = 0 WHERE Classification == 2",
         f"Classification = 1 WHERE ((Classification >= 3) && (Classification <= 5))",
@@ -119,7 +119,7 @@ def parse_lidar(dataset_root, grid_size):
 
         # 循环处理 .laz 文件
         for laz_file in os.listdir(folder_path):
-            if laz_file.endswith(".laz"):  # 确保只处理 .laz 文件
+            if laz_file.endswith(".las" ) or laz_file.endswith(".laz"):  # 确保只处理 .las 和.laz 的文件
                 print('start', laz_file)
                 laz_file_path = os.path.join(folder_path, laz_file)
                 # 调用处理函数，并传入 split
@@ -129,7 +129,7 @@ def parse_lidar(dataset_root, grid_size):
 def main_preprocess():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset_root", help="Path where raw datasets are located.", default=r'/datasets/navarra-test/'
+        "--dataset_root", help="Path where raw datasets are located.", default=r'/datasets/test3/'
     )
 
     parser.add_argument(

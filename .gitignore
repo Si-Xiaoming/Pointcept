@@ -13,4 +13,5 @@ outputs/
 .idea
 */.DS_Store
 **/*.out
+.VSCodeCounter
 
