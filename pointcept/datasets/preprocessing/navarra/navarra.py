@@ -22,7 +22,7 @@ def execuate_las(raw_path, grid_size, split, output_path):
     pipeline |= pdal.Reader.las(filename=raw_path)
     pipeline |= pdal.Filter.stats(dimensions="Intensity,Red,Blue,Green")
     pipeline |= pdal.Filter.voxelcenternearestneighbor(cell=grid_size)
-    #pipeline |= pdal.Filter.range(limits="Classification[2:6], Classification[8:8]")
+    pipeline |= pdal.Filter.range(limits="Classification[2:6], Classification[8:8]")
     pipeline |= pdal.Filter.assign(value=[
         f"Classification = 0 WHERE Classification == 2",
         f"Classification = 1 WHERE ((Classification >= 3) && (Classification <= 5))",
