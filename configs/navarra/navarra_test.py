@@ -7,7 +7,7 @@ mix_prob = 0.8 #
 empty_cache = False
 enable_amp = True
 sample_method = "ball_sample"
-num_points_per_step = 30000
+num_points_per_step = 50000
 
 # model settings
 model = dict(
