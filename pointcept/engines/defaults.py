@@ -75,8 +75,9 @@ def default_argument_parser(epilog=None):
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--config-file", default="/home/Pointcept/configs/navarra/navarra_test.py", metavar="FILE", help="path to config file"
+        "--config-file", default="/home/Pointcept/configs/navarra/pretrain-sonata-v1m1-0-base-navarra.py", metavar="FILE", help="path to config file"
     )
+    # "/home/Pointcept/configs/navarra/navarra_test.py" #
     parser.add_argument(
         "--num-gpus", type=int, default=1, help="number of gpus *per machine*"
     )

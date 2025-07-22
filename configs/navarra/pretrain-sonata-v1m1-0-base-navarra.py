@@ -7,7 +7,7 @@ _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
 batch_size = 1  # bs: total bs in all gpus
-num_worker = 0
+num_worker = 1
 mix_prob = 0
 clip_grad = 3.0
 empty_cache = False
@@ -15,6 +15,9 @@ enable_amp = True
 amp_dtype = "bfloat16"
 evaluate = False
 find_unused_parameters = False
+num_points_per_step = 3000  # 65536
+grid_size = 0.2 # 0.02
+
 
 
 # model settings
@@ -109,11 +112,11 @@ scheduler = dict(
 
 # dataset settings
 transform = [
-    dict(type="GridSample", grid_size=0.02, hash_type="fnv", mode="train"),
+    dict(type="GridSample", grid_size=grid_size, hash_type="fnv", mode="train"),
     dict(type="Copy", keys_dict={"coord": "origin_coord"}),
     dict(
         type="MultiViewGenerator",
-        view_keys=("coord", "origin_coord", "color", "normal"),
+        view_keys=("coord", "origin_coord", "color"),
         global_view_num=2,
         global_view_scale=(0.4, 1.0),
         local_view_num=4,
@@ -163,10 +166,10 @@ transform = [
             # dict(type="ChromaticJitter", p=0.95, std=0.05),
             dict(type="NormalizeColor"),
         ],
-        max_size=65536,
+        max_size=num_points_per_step,
     ),
     dict(type="ToTensor"),
-    dict(type="Update", keys_dict={"grid_size": 0.02}),
+    dict(type="Update", keys_dict={"grid_size": grid_size}),
     dict(
         type="Collect",
         keys=(
@@ -182,8 +185,8 @@ transform = [
             "name",
         ),
         offset_keys_dict=dict(),
-        global_feat_keys=("global_coord", "global_color", "global_normal"),
-        local_feat_keys=("local_coord", "local_color", "local_normal"),
+        global_feat_keys=("global_coord", "global_color"),
+        local_feat_keys=("local_coord", "local_color"),
     ),
 ]
 # dataset settings

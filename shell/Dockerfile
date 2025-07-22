@@ -86,3 +86,5 @@ RUN pip install libs/pointops
 RUN pip install libs/pointgroup_ops
 
 WORKDIR /workspace
+ENV http_proxy=""
+ENV https_proxy=""
