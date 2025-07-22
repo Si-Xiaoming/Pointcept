@@ -14,7 +14,7 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 
 
-def execuate_las(raw_path, grid_size, split, output_path):
+def execuate_las(raw_path, grid_size, split, output_path, has_label=True):
     scene_name = os.path.splitext(os.path.basename(raw_path))[0]
 
     has_intensity = has_color = True
@@ -22,13 +22,16 @@ def execuate_las(raw_path, grid_size, split, output_path):
     pipeline |= pdal.Reader.las(filename=raw_path)
     pipeline |= pdal.Filter.stats(dimensions="Intensity,Red,Blue,Green")
     pipeline |= pdal.Filter.voxelcenternearestneighbor(cell=grid_size)
-    pipeline |= pdal.Filter.range(limits="Classification[2:6], Classification[8:8]")
-    pipeline |= pdal.Filter.assign(value=[
-        f"Classification = 0 WHERE Classification == 2",
-        f"Classification = 1 WHERE ((Classification >= 3) && (Classification <= 5))",
-        f"Classification = 2 WHERE Classification == 6",
-        f"Classification = 3 WHERE Classification == 8"
-    ])
+    if has_label:
+        pipeline |= pdal.Filter.range(limits="Classification[2:6], Classification[8:8]")
+        pipeline |= pdal.Filter.assign(value=[
+            f"Classification = 0 WHERE Classification == 2",
+            f"Classification = 1 WHERE ((Classification >= 3) && (Classification <= 5))",
+            f"Classification = 2 WHERE Classification == 6",
+            f"Classification = 3 WHERE Classification == 8"
+        ])
+    else:
+        print("No label, only process point cloud.")
     count = pipeline.execute()
     arrays = pipeline.arrays[0]
     metadata = pipeline.metadata['metadata']
@@ -129,7 +132,7 @@ def parse_lidar(dataset_root, grid_size):
 def main_preprocess():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset_root", help="Path where raw datasets are located.", default=r'/datasets/test3/'
+        "--dataset_root", help="Path where raw datasets are located.", default=r'/datasets/zg_data/'
     )
 
     parser.add_argument(
