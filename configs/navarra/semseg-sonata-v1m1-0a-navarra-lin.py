@@ -1,21 +1,23 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 24  # bs: total bs in all gpus
-num_worker = 48
+batch_size = 2  # bs: total bs in all gpus
+num_worker = 1
 mix_prob = 0.8
 clip_grad = 3.0
 empty_cache = False
 enable_amp = True
-
+num_points_per_step = 300
+weight = "/datasets/exp/model/model_last_v1.pth"
+grid_size = 2
 # model settings
 model = dict(
     type="DefaultSegmentorV2",
-    num_classes=20,
+    num_classes=4,
     backbone_out_channels=1232,
     backbone=dict(
         type="PT-v3m2",
-        in_channels=9,
+        in_channels=6,
         order=("z", "z-trans", "hilbert", "hilbert-trans"),
         stride=(2, 2, 2, 2),
         enc_depths=(3, 3, 3, 12, 3),
@@ -47,7 +49,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 800
+epoch = 200
 optimizer = dict(type="AdamW", lr=0.002, weight_decay=0.02)
 scheduler = dict(
     type="OneCycleLR",
@@ -60,33 +62,17 @@ scheduler = dict(
 param_dicts = [dict(keyword="block", lr=0.0002)]
 
 # dataset settings
-dataset_type = "ScanNetDataset"
-data_root = "data/scannet"
+dataset_type = "NavarraDataset"
+data_root = "/datasets/navarra-test/"
 
 data = dict(
-    num_classes=20,
+    num_classes=4,
     ignore_index=-1,
-    names=[
-        "wall",
-        "floor",
-        "cabinet",
-        "bed",
-        "chair",
-        "sofa",
-        "table",
-        "door",
-        "window",
-        "bookshelf",
-        "picture",
-        "counter",
-        "desk",
-        "curtain",
-        "refridgerator",
-        "shower curtain",
-        "toilet",
-        "sink",
-        "bathtub",
-        "otherfurniture",
+    names = [
+        "ground",
+        "vegetation",
+        "building",
+        "others",
     ],
     train=dict(
         type=dataset_type,
@@ -113,12 +99,12 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=grid_size,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
             ),
-            dict(type="SphereCrop", point_max=102400, mode="random"),
+            dict(type="SphereCrop", point_max=num_points_per_step, mode="random"),
             dict(type="CenterShift", apply_z=False),
             dict(type="NormalizeColor"),
             # dict(type="ShufflePoint"),
@@ -126,7 +112,7 @@ data = dict(
             dict(
                 type="Collect",
                 keys=("coord", "grid_coord", "segment"),
-                feat_keys=("coord", "color", "normal"),
+                feat_keys=("coord", "color"),
             ),
         ],
         test_mode=False,
@@ -140,7 +126,7 @@ data = dict(
             dict(type="Copy", keys_dict={"segment": "origin_segment"}),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=grid_size,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -152,7 +138,7 @@ data = dict(
             dict(
                 type="Collect",
                 keys=("coord", "grid_coord", "segment", "origin_segment", "inverse"),
-                feat_keys=("coord", "color", "normal"),
+                feat_keys=("coord", "color"),
             ),
         ],
         test_mode=False,
@@ -169,7 +155,7 @@ data = dict(
         test_cfg=dict(
             voxelize=dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=grid_size,
                 hash_type="fnv",
                 mode="test",
                 return_grid_coord=True,
@@ -181,7 +167,7 @@ data = dict(
                 dict(
                     type="Collect",
                     keys=("coord", "grid_coord", "index"),
-                    feat_keys=("coord", "color", "normal"),
+                    feat_keys=("coord", "color"),
                 ),
             ],
             aug_transform=[
