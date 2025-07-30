@@ -161,7 +161,7 @@ data = dict(
         ],
         test_mode=False,
     ),
-test=dict(
+    test=dict(
         type=dataset_type,
         split="test",
         data_root=data_root,
@@ -220,4 +220,9 @@ test=dict(
     ),
 )
 test_only = True  # test process
-weight = "/datasets/exps/default/model/model_best.pth"  # path to model weight
+weight = "/datasets/exp/model/model_best_supervised.pth"  # path to model weight
+
+  # model_best_supervised.pth     model_last-ep3.pth
+test_file = "/datasets/navarra-test2/raw/test/04.laz"
+grid_size=1.0
+# test = dict(type="EvaluateSSLModel", verbose=True)

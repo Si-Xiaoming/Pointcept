@@ -79,6 +79,7 @@ def default_argument_parser(epilog=None):
     )
     # "/home/Pointcept/configs/navarra/navarra_test.py" #  semseg-sonata-v1m1-0a-navarra-lin.py
     # "/home/Pointcept/configs/navarra/pretrain-sonata-v1m1-0-base-navarra.py"
+    # "/home/Pointcept/configs/navarra/semseg-sonata-v1m1-0a-navarra-lin.py"
     parser.add_argument(
         "--num-gpus", type=int, default=1, help="number of gpus *per machine*"
     )

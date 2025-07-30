@@ -39,14 +39,16 @@ TESTERS = Registry("testers")
 
 
 class TesterBase:
-    def __init__(self, cfg, model=None, test_loader=None, verbose=False) -> None:
+    def __init__(self, cfg, model=None, test_loader=None, verbose=False, load_strict=True) -> None:
         torch.multiprocessing.set_sharing_strategy("file_system")
+
         self.logger = get_root_logger(
             log_file=os.path.join(cfg.save_path, "test.log"),
             file_mode="a" if cfg.resume else "w",
         )
         self.logger.info("=> Loading config ...")
         self.cfg = cfg
+        self.load_strict = load_strict
         self.verbose = verbose
         if self.verbose and model is None:
             # if model is not none, trigger tester with trainer, no need to print config
@@ -84,7 +86,7 @@ class TesterBase:
                     if comm.get_world_size() > 1:
                         key = "module." + key  # xxx.xxx -> module.xxx.xxx
                 weight[key] = value
-            model.load_state_dict(weight, strict=True)
+            model.load_state_dict(weight, strict=self.load_strict)  # True
             self.logger.info(
                 "=> Loaded weight '{}' (epoch {})".format(
                     self.cfg.weight, checkpoint["epoch"]

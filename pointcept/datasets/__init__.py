@@ -24,6 +24,6 @@ from .shapenet_part import ShapeNetPartDataset
 from .dataloader import MultiDatasetDataloader
 
 # LAS data
-from .Farmland import FarmlandDataset
-from .opengf import OpenGFDataset
+
 from .navarra import NavarraDataset
+from .PredictDataset import PredictDataset

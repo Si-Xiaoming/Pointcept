@@ -106,9 +106,22 @@ def parse_lidar(dataset_root, grid_size):
           --- *.laz
           -- test
           --- *.laz
-        root_path 是 raw 文件夹的路径
-        - tile
         - processed
+          -- train
+          --- train_data_01
+          ---- coord.npy
+          ---- color.npy
+          ---- segment.npy
+          -- val
+          --- val_data_01
+          ---- coord.npy
+          ---- color.npy
+          ---- segment.npy
+          -- test
+          --- test_data_01
+          ---- coord.npy
+          ---- color.npy
+          ---- segment.npy
         '''
     # 获取 'raw' 目录下的第二级文件夹名称
     split = []
@@ -135,9 +148,6 @@ def main_preprocess():
         "--dataset_root", help="Path where raw datasets are located.", default=r'/datasets/zg_data/'
     )
 
-    parser.add_argument(
-        "--num_workers", default=1, type=int, help="Num workers for preprocessing."
-    )
     parser.add_argument(
         "--grid_size", default=1.0, type=float, help="grid size in meters."
     )
