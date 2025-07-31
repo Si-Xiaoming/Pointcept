@@ -1,12 +1,10 @@
 
-CUDA_VISIBLE_DEVICES=3,4
+CUDA_VISIBLE_DEVICES=0  # which gpu
 NUM_GPU=1
-CONFIG_PATH=configs/s3dis/semseg-pt-v3m1-1-rpe.py
-SAVE_PATH=outputs/s3dis/semseg-pt-v3m1-1-rpe
+CONFIG_PATH=configs/navarra/semseg-sonata-v1m1-0a-navarra-lin.py
+SAVE_PATH=/datasets/navarra/semseg-sonata-v1m1-0a-navarra-lin
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
 
-export PYTHONPATH=./
+export PYTHONPATH=./   # Project path
+# python -c "import torch; print(torch.cuda.is_available());"
 python tools/train.py --config-file ${CONFIG_PATH} --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
-
-
---config-file configs/s3dis/semseg-pt-v3m1-1-rpe.py --num-gpus 1 --options save_path=outputs/s3dis/semseg-pt-v3m1-1-rpe

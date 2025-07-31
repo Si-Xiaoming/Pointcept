@@ -29,16 +29,22 @@ def convert_npy_to_ply(npy_pos_file, npy_label_file, ply_file):
         for pos, label in zip(positions, labels):
             f.write(f"{pos[0]} {pos[1]} {pos[2]} {label}\n")
 
-if __name__ == "__main__":
-    npy_pos_file="/datasets/navarra-test/concate/build3_coord.npy"
-    npy_label_file="/datasets/navarra-test/concate/build3_pred.npy"
-    ply_file="/datasets/navarra-test/concate/build3_processed.ply"
-
-    dir_path = "/datasets/navarra-test2/processed/test/build3"
-    data_name = "build3"
+def main_process(dir_path, data_name):
+    # dir_path = "/datasets/navarra-test2/processed/test/build3"
+    dir_path = "/datasets/exp/default/result"
+    
     npy_pos_file = f"{dir_path}/{data_name}_coord.npy"
     npy_label_file = f"{dir_path}/{data_name}_pred.npy"
     ply_file = f"{dir_path}/{data_name}.ply"
-
-
     convert_npy_to_ply(npy_pos_file, npy_label_file, ply_file)
+
+if __name__ == "__main__":
+    # dir_path = "/datasets/navarra-test2/processed/test/build3"
+    dir_path = "/datasets/exp/default/result"
+    data_name = "02"
+    main_process(dir_path, data_name)
+
+
+
+
+    
