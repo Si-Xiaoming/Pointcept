@@ -6,7 +6,7 @@ Please cite our work if the code is helpful to you.
 """
 
 from pointcept.utils.registry import Registry
-
+from pointcept.models import losses
 LOSSES = Registry("losses")
 
 
@@ -17,13 +17,17 @@ class Criteria(object):
         for loss_cfg in self.cfg:
             self.criteria.append(LOSSES.build(cfg=loss_cfg))
 
-    def __call__(self, pred, target):
+    def __call__(self, pred=None, target=None, feat=None, batch=None):
         if len(self.criteria) == 0:
             # loss computation occur in model
             return pred
         loss = 0
         for c in self.criteria:
-            loss += c(pred, target)
+            if isinstance(c, losses.DynamicCenterLoss):
+                loss += c(pred, target, feat, batch)
+
+            else:
+                loss += c(pred, target)
         return loss
 
 

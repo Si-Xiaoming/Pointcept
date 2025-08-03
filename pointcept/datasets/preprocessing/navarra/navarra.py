@@ -145,7 +145,7 @@ def parse_lidar(dataset_root, grid_size):
 def main_preprocess():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset_root", help="Path where raw datasets are located.", default=r'/datasets/fine_tuning_data/'
+        "--dataset_root", help="Path where raw datasets are located.", default=r'/datasets/ft_data/'
     )
 
     parser.add_argument(

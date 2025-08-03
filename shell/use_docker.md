@@ -26,6 +26,12 @@ docker run -it --gpus all -m 30g --cpus 8 ^
 
 >docker run -it --name ptcept_container --gpus all -m 50g --shm-size 8G --cpus 8 -v %CD%:/workspace -v D:/04-Datasets:/datasets -p 8000:22 ptcept:02
 
+
+docker run -it --name ptcept_container --gpus all -m 50g --shm-size 8G --cpus 8 -v %CD%:/workspace -v D:/04-Datasets:/datasets -p 8000:22 ptcept:02
+
+
+docker run -it --name test_container --gpus all -m 50g --shm-size 8G --cpus 8 -v D:/04-Datasets:/datasets -p 7533:22 ptcept:v3
+
 # 容器打包成镜像
 
 ```shell

@@ -13,7 +13,7 @@ weight = "/datasets/models/model_last-ep9.pth"
 
 # model settings
 model = dict(
-    type="DefaultSegmentorV2",
+    type="DefaultSegmentorV3",
     num_classes=4,
     backbone_out_channels=64,
     backbone=dict(
@@ -49,6 +49,7 @@ model = dict(
     criteria=[
         dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1),
         dict(type="LovaszLoss", mode="multiclass", loss_weight=1.0, ignore_index=-1),
+        dict(type="DynamicCenterLoss")
     ],
     freeze_backbone=False,
 )

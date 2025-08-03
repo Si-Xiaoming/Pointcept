@@ -30,9 +30,6 @@ def convert_npy_to_ply(npy_pos_file, npy_label_file, ply_file):
             f.write(f"{pos[0]} {pos[1]} {pos[2]} {label}\n")
 
 def main_process(dir_path, data_name):
-    # dir_path = "/datasets/navarra-test2/processed/test/build3"
-    dir_path = "/datasets/exp/default/result"
-    
     npy_pos_file = f"{dir_path}/{data_name}_coord.npy"
     npy_label_file = f"{dir_path}/{data_name}_pred.npy"
     ply_file = f"{dir_path}/{data_name}.ply"
