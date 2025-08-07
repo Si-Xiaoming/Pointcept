@@ -6,7 +6,6 @@ from .builder import LOSSES
 @LOSSES.register_module()
 class DynamicCenterLoss(nn.Module):
     """Dynamic Center Loss for Point Cloud Semantic Segmentation.
-    ... (docstring remains the same) ...
     """
     """Dynamic Center Loss for Point Cloud Semantic Segmentation.
 
@@ -207,4 +206,3 @@ class DynamicCenterLoss(nn.Module):
                     # Optional normalization
                     # self.centers[c] = F.normalize(self.centers[c], dim=0, p=2)
 
-    # ... (rest of the class, like extra_repr, remains the same) ...

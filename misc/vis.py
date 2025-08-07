@@ -226,10 +226,11 @@ def main_process():
     )
 
     # 可视化结果
+    name = "std"
     epoch = 5
     plot_tsne_results(feat_tsne, sampled_segment,
                       title="PCA + T-SNE Visualization (每类别最多500个点)",
-                      save_path=f"D:\\04-Datasets\\vis\\pca_tsne_visualization{epoch}.png")
+                      save_path=f"D:\\04-Datasets\\vis\\pca_tsne_{name}_{epoch}.png")
 
     # 保存结果
     # np.save('sampled_feat.npy', sampled_feat)

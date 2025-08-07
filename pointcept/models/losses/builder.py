@@ -23,7 +23,7 @@ class Criteria(object):
             return pred
         loss = 0
         for c in self.criteria:
-            if isinstance(c, losses.DynamicCenterLoss):
+            if isinstance(c, losses.DynamicCenterLoss) or isinstance(c, losses.ClassAwareTCRLoss):
                 loss += c(pred, target, feat, batch)
 
             else:

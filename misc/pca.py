@@ -14,7 +14,7 @@ from pointcept.datasets import NavarraDataset
 from pointcept.models.utils.structure import Point
 from torch.utils.data.dataloader import default_collate
 from collections.abc import Mapping, Sequence
-from .transform import default
+from misc.transform import default
 try:
     import flash_attn
 except ImportError:
@@ -94,7 +94,7 @@ MODEL = dict(
 
 
 # WEIGHT = "/datasets/exp/model/model_last-ep9.pth"
-WEIGHT = "/datasets/exp-0801/model/model_best-centerloss.pth"
+WEIGHT = "/datasets/exp-0801/model/ft/model_best-tcr.pth"
 
 def get_pca_color(feat, brightness=1.25, center=True):
     u, s, v = torch.pca_lowrank(feat, center=center, q=6, niter=5)
