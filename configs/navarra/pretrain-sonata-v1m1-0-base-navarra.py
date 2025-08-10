@@ -15,7 +15,7 @@ enable_amp = True
 amp_dtype = "bfloat16"
 evaluate = False
 find_unused_parameters = False
-num_points_per_step = 3000  # 65536
+num_points_per_step = 300  # 65536
 grid_size = 0.2 # 0.02
 
 

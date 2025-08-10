@@ -1,1 +1,1 @@
-from .test_laz import EvaluateSSLModel
+from .test_laz import SemSegTesterLaz

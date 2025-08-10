@@ -9,20 +9,30 @@ from sklearn.preprocessing import StandardScaler
 from collections import Counter
 
 
-def load_and_process_data(coord_path, segment_path, feat_path):
+def load_and_process_data(coord_path, segment_path, feat_path, color_path=None):
     """
     加载点云数据
     """
     coord = np.load(coord_path)
     segment = np.load(segment_path)
     feat = np.load(feat_path)
-
     print(f"Coord shape: {coord.shape}")
     print(f"Segment shape: {segment.shape}")
     print(f"Feat shape: {feat.shape}")
     print(f"Unique labels: {np.unique(segment)}")
 
-    return coord, segment, feat
+    if color_path is not None:
+        color = np.load(color_path)
+        # 如果有颜色数据，将其添加到特征中
+        return coord, segment, feat, color
+    else:
+        # 如果没有颜色数据，返回特征和坐标
+        return coord, segment, feat
+    
+
+
+
+
 
 
 def sample_points_by_class(feat, segment, max_points_per_class=500):
@@ -190,6 +200,33 @@ def analyze_class_distribution(segment):
     return label_counts
 
 
+def vis_color(coord, feat, segment, color=None):
+    """
+    可视化点云数据
+    """
+    if color is None:
+        color = np.random.rand(len(segment), 3)  # 随机颜色
+
+    # 创建Open3D点云对象
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(coord)
+    pcd.colors = o3d.utility.Vector3dVector(color)
+
+    # 可视化
+    o3d.visualization.draw_geometries([pcd], window_name="Point Cloud Visualization")
+
+def main_vis():
+    print("--------start----------")
+    # 1. load data
+    coord_path = r"D:\04-Datasets\vis\coord.npy"
+    feat_path = r"D:\04-Datasets\vis\feat.npy"
+    color = r"D:\04-Datasets\vis\color.npy"
+    segment_path = r"D:\04-Datasets\vis\segment.npy"
+    # 加载数据
+    coord, segment, feat, color = load_and_process_data(coord_path, segment_path, feat_path, color)
+    # 可视化点云数据
+    vis_color(coord, feat, segment, color)
+
 def main_process():
 
     print("--------start----------")
@@ -246,7 +283,7 @@ def main_process():
 
 
 if __name__ == "__main__":
-    main_process()
+    main_vis()
 
 
 
