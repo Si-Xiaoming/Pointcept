@@ -114,7 +114,7 @@ data = dict(
             ),
             dict(type="SphereCrop", point_max=num_points_per_step, mode="random"),
             dict(type="CenterShift", apply_z=False),
-            dict(type="NormalizeColor"),
+            # dict(type="NormalizeColor"),
             # dict(type="ShufflePoint"),
             dict(type="ToTensor"),
             dict(
@@ -141,7 +141,7 @@ data = dict(
                 return_inverse=True,
             ),
             dict(type="CenterShift", apply_z=False),
-            dict(type="NormalizeColor"),
+            # dict(type="NormalizeColor"),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -157,7 +157,7 @@ data = dict(
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
-            dict(type="NormalizeColor"),
+            # dict(type="NormalizeColor"),
         ],
         test_mode=True,
         test_cfg=dict(
