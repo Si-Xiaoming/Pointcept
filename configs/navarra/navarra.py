@@ -8,6 +8,15 @@ empty_cache = False
 enable_amp = True
 sample_method = "ball_sample"
 num_points_per_step = 30000
+epoch = 100
+grid_size = 1.0
+
+# dataset settings
+dataset_type = "NavarraDataset"
+data_root = "/datasets/navarra-test/"
+test_laz = "/datasets/navarra-test2/raw/test/04.laz"
+has_label = True
+
 
 # model settings
 model = dict(
@@ -54,7 +63,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 100
+
 optimizer = dict(type="AdamW", lr=0.006, weight_decay=0.05)
 scheduler = dict(
     type="OneCycleLR",
@@ -65,13 +74,7 @@ scheduler = dict(
     final_div_factor=1000.0,
 )
 param_dicts = [dict(keyword="block", lr=0.0006)]
-grid_size = 1.0
 
-# dataset settings
-dataset_type = "NavarraDataset"
-data_root = "/datasets/navarra-test/"
-test_laz = "/datasets/navarra-test2/raw/test/04.laz"
-has_label = True
 
 data = dict(
     num_classes = 4,

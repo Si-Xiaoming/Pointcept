@@ -13,11 +13,14 @@ weight = "/datasets/exp/model/model_best_dmh.pth"
 # weight = "/datasets/exp/model/model_last-ep3.pth"  # path to model weight
   # model_best_supervised.pth    model_last-ep3.pth
 grid_size = 1
+epoch = 2000
+dataset_type = "NavarraDataset"
+data_root = "/datasets/navarra-test/"
 # model settings
 model = dict(
     type="DefaultSegmentorV2",
     num_classes=4,
-    backbone_out_channels=1232,   # 1232
+    backbone_out_channels=1232,
     backbone=dict(
         type="PT-v3m2",
         in_channels=6,
@@ -52,7 +55,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 2000
+
 optimizer = dict(type="AdamW", lr=0.002, weight_decay=0.02)
 scheduler = dict(
     type="OneCycleLR",
@@ -65,8 +68,6 @@ scheduler = dict(
 param_dicts = [dict(keyword="block", lr=0.0002)]
 
 # dataset settings
-dataset_type = "NavarraDataset"
-data_root = "/datasets/navarra-test/"
 
 data = dict(
     num_classes=4,

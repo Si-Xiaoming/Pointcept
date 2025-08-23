@@ -1,15 +1,22 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 3  # bs: total bs in all gpus
+batch_size = 1  # bs: total bs in all gpus
 num_worker = 1
 mix_prob = 0.8
 clip_grad = 3.0
 empty_cache = False
 enable_amp = True
 num_points_per_step = 65536
-grid_size = 1.0
-weight = "/datasets/models/model_last-ep9.pth"
+grid_size = 0.1
+weight = "/datasets/exp/default-1.0/model/model_best.pth"
+
+dataset_type = "NavarraDataset"
+data_root = "/datasets/internship/unused_land_data"
+# internship\unused_land_data
+# "/datasets/ft_data/"
+epoch = 200
+eval_epoch = 20
 
 # model settings
 model = dict(
@@ -54,7 +61,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 2000
+
 optimizer = dict(type="AdamW", lr=0.002, weight_decay=0.02)
 scheduler = dict(
     type="OneCycleLR",
@@ -65,9 +72,6 @@ scheduler = dict(
     final_div_factor=1000.0,
 )
 param_dicts = [dict(keyword="block", lr=0.0002)]
-
-dataset_type = "NavarraDataset"
-data_root = "/datasets/ft_data/"
 
 data = dict(
     num_classes=4,
@@ -136,6 +140,7 @@ data = dict(
                 return_grid_coord=True,
                 return_inverse=True,
             ),
+            # dict(type="SphereCrop", point_max=num_points_per_step, mode="random"),
             dict(type="CenterShift", apply_z=False),
             # dict(type="NormalizeColor"),
             dict(type="ToTensor"),

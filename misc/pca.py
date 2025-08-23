@@ -94,7 +94,7 @@ MODEL = dict(
 
 
 # WEIGHT = "/datasets/exp/model/model_last-ep9.pth"
-WEIGHT = "/datasets/exp-0801/model/ft/model_best-std.pth"
+WEIGHT = "/datasets/exp/model_best.pth"
 
 def get_pca_color(feat, brightness=1.25, center=True):
     u, s, v = torch.pca_lowrank(feat, center=center, q=6, niter=5)
@@ -154,8 +154,9 @@ def load_model(keywords = "module.student.backbone", replacement = "module.backb
 
 
 def main_process():
-    data_root = r"/datasets/navarra-test/processed/test/02"
-    data_root = r"/datasets/internship/unused_land_data/processed/ground_processed"
+    # data_root = r"/datasets/navarra-test/processed/test/02"
+    # data_root = r"/datasets/internship/unused_land_data/processed/test/ground_processed"
+    data_root = r"/datasets/navarra-test_only/processed/test/04"
     points = load_data(data_root)
     transform = default()
     points = transform(points)

@@ -9,6 +9,12 @@ enable_amp = True
 sample_method = "ball_sample"
 num_points_per_step = 50000
 
+epoch = 100
+
+# dataset settings
+dataset_type = "NavarraDataset"
+data_root = "/datasets/navarra-test/"
+
 # model settings
 model = dict(
     type="DefaultSegmentorV2",
@@ -54,7 +60,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 100
+
 optimizer = dict(type="AdamW", lr=0.006, weight_decay=0.05)
 scheduler = dict(
     type="OneCycleLR",
@@ -66,9 +72,6 @@ scheduler = dict(
 )
 param_dicts = [dict(keyword="block", lr=0.0006)]
 
-# dataset settings
-dataset_type = "NavarraDataset"
-data_root = "/datasets/navarra-test/"
 
 data = dict(
     num_classes = 4,

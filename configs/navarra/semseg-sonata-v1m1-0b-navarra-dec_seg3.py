@@ -10,6 +10,9 @@ enable_amp = True
 num_points_per_step = 65536
 grid_size = 1.0
 weight = "/datasets/models/model_last-ep9.pth"
+epoch = 2000
+dataset_type = "NavarraDataset"
+data_root = "/datasets/ft_data/"
 
 # model settings
 model = dict(
@@ -55,7 +58,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 2000
+
 optimizer = dict(type="AdamW", lr=0.002, weight_decay=0.02)
 scheduler = dict(
     type="OneCycleLR",
@@ -67,8 +70,6 @@ scheduler = dict(
 )
 param_dicts = [dict(keyword="block", lr=0.0002)]
 
-dataset_type = "NavarraDataset"
-data_root = "/datasets/ft_data/"
 
 data = dict(
     num_classes=4,

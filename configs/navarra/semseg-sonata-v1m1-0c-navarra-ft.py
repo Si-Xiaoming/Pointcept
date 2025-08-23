@@ -8,10 +8,15 @@ clip_grad = 3.0
 empty_cache = False
 enable_amp = True
 num_points_per_step = 65536
-grid_size = 1.0
-weight = "/datasets/models/model_last-ep9.pth"
+grid_size = 0.1
+weight = "/datasets/exp/model_best.pth"
 #weight = "/datasets/models/ft/model_last-std.pth"
+dataset_type = "NavarraDataset"
+# data_root = "/datasets/ft_data/"
+data_root = "/datasets/internship/unused_land_data/"
 
+epoch = 20 # 300
+eval_epoch = 10
 # model settings
 model = dict(
     type="DefaultSegmentorV3",
@@ -51,14 +56,13 @@ model = dict(
         dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1),
         dict(type="LovaszLoss", mode="multiclass", loss_weight=1.0, ignore_index=-1),
         # dict(type="ClassAwareTCRLoss")
-        dict(type="DynamicCenterLoss")
+        # dict(type="DynamicCenterLoss")
     ],
     freeze_backbone=False,
 )
 
 # scheduler settings
-epoch = 300
-eval_epoch = 10
+
 optimizer = dict(type="AdamW", lr=0.002, weight_decay=0.02)
 scheduler = dict(
     type="OneCycleLR",
@@ -70,8 +74,7 @@ scheduler = dict(
 )
 param_dicts = [dict(keyword="block", lr=0.0002)]
 
-dataset_type = "NavarraDataset"
-data_root = "/datasets/ft_data/"
+
 
 data = dict(
     num_classes=4,

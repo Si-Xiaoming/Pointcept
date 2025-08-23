@@ -16,8 +16,9 @@ amp_dtype = "bfloat16"
 evaluate = False
 find_unused_parameters = False
 num_points_per_step = 300  # 65536
-grid_size = 0.2 # 0.02
-
+grid_size = 0.1 # 0.02
+dataset_type = "NavarraDataset"
+data_root = "/datasets/navarra-test/"
 
 
 # model settings
@@ -190,8 +191,7 @@ transform = [
     ),
 ]
 # dataset settings
-dataset_type = "NavarraDataset"
-data_root = "/datasets/navarra-test/"
+
 data = dict(
     train=dict(
         type = dataset_type,

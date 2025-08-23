@@ -54,6 +54,9 @@ def intersection_and_union_gpu(output, target, k, ignore_index=-1):
     # 'K' classes, output and target sizes are N or N * L or N * H * W, each value in range 0 to K - 1.
     assert output.dim() in [1, 2, 3]
     assert output.shape == target.shape
+
+    original_device = output.device
+
     output = output.view(-1)
     target = target.view(-1)
     output[target == ignore_index] = ignore_index
@@ -62,6 +65,11 @@ def intersection_and_union_gpu(output, target, k, ignore_index=-1):
     area_output = torch.histc(output, bins=k, min=0, max=k - 1)
     area_target = torch.histc(target, bins=k, min=0, max=k - 1)
     area_union = area_output + area_target - area_intersection
+
+    # area_intersection = area_intersection.to(original_device)
+    # area_union = area_union.to(original_device)
+    # area_target = area_target.to(original_device)
+
     return area_intersection, area_union, area_target
 
 

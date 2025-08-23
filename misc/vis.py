@@ -283,7 +283,8 @@ def main_process():
 
 
 if __name__ == "__main__":
-    main_vis()
+    # main_vis()
+    main_process()
 
 
 
