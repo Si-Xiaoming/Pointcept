@@ -14,6 +14,7 @@ weight = "/datasets/exp/model_best.pth"
 dataset_type = "NavarraDataset"
 # data_root = "/datasets/ft_data/"
 data_root = "/datasets/internship/unused_land_data/"
+save_path = "/datasets/exp/default_tcr"
 
 epoch = 20 # 300
 eval_epoch = 10
