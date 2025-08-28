@@ -22,6 +22,100 @@ from pointcept.models.builder import MODELS
 from pointcept.models.utils.misc import offset2bincount
 from pointcept.models.utils.structure import Point
 from pointcept.models.modules import PointModule, PointSequential
+import math
+
+
+class LoRALinear(nn.Module):
+    """LoRA 适配层，用于替换 PTv3 中的线性层"""
+    def __init__(self, linear_layer, rank=4, alpha=16, dropout=0.0):
+        super().__init__()
+
+        self.linear = linear_layer
+        d, k = linear_layer.weight.shape
+        
+        # 冻结原始权重（关键步骤）
+        self.linear.weight.requires_grad = False
+        if self.linear.bias is not None:
+            self.linear.bias.requires_grad = False
+            
+        # LoRA 参数
+        self.rank = rank
+        self.alpha = alpha
+        self.scaling = alpha / rank  # 重要缩放因子
+        
+        # 低秩分解矩阵
+        self.lora_A = nn.Parameter(torch.zeros((k, rank)))
+        self.lora_B = nn.Parameter(torch.zeros((rank, d)))
+        
+        # 初始化 LoRA 参数
+        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+        nn.init.zeros_(self.lora_B)
+        
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        
+    def forward(self, x):
+        # 原始线性变换
+        original_output = self.linear(x)
+        
+        # LoRA 变换：x @ (A @ B) * scaling
+        lora_output = self.dropout(x) @ self.lora_A @ self.lora_B
+        lora_output = lora_output * self.scaling
+        
+        return original_output + lora_output
+
+class LoRAQKVLinear(nn.Module):
+    """专门用于 QKV 线性层的 LoRA，只对 Q 和 V 进行 LoRA 适配"""
+    def __init__(self, qkv_linear_layer, rank=4, alpha=16, dropout=0.0):
+        super().__init__()
+        self.qkv_linear = qkv_linear_layer
+        out_features, in_features = qkv_linear_layer.weight.shape
+        assert out_features % 3 == 0, "QKV linear layer output features must be divisible by 3"
+        self.dim = out_features // 3
+
+        # 冻结原始权重
+        self.qkv_linear.weight.requires_grad = False
+        if self.qkv_linear.bias is not None:
+            self.qkv_linear.bias.requires_grad = False
+
+        # LoRA 参数 for Q
+        self.rank_q = rank
+        self.alpha_q = alpha
+        self.scaling_q = alpha / rank
+        self.lora_A_q = nn.Parameter(torch.zeros((in_features, rank)))
+        self.lora_B_q = nn.Parameter(torch.zeros((rank, self.dim)))
+        nn.init.kaiming_uniform_(self.lora_A_q, a=math.sqrt(5))
+        nn.init.zeros_(self.lora_B_q)
+
+        # LoRA 参数 for V
+        self.rank_v = rank
+        self.alpha_v = alpha
+        self.scaling_v = alpha / rank
+        self.lora_A_v = nn.Parameter(torch.zeros((in_features, rank)))
+        self.lora_B_v = nn.Parameter(torch.zeros((rank, self.dim)))
+        nn.init.kaiming_uniform_(self.lora_A_v, a=math.sqrt(5))
+        nn.init.zeros_(self.lora_B_v)
+
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+    def forward(self, x):
+        # 原始 QKV 变换
+        qkv = self.qkv_linear(x) # [..., 3*dim]
+        q, k, v = qkv.chunk(3, dim=-1) # [..., dim] each
+
+        # LoRA 变换 for Q
+        lora_q = self.dropout(x) @ self.lora_A_q @ self.lora_B_q
+        lora_q = lora_q * self.scaling_q
+        q = q + lora_q
+
+        # LoRA 变换 for V (K 保持不变)
+        lora_v = self.dropout(x) @ self.lora_A_v @ self.lora_B_v
+        lora_v = lora_v * self.scaling_v
+        v = v + lora_v
+
+        # 合并 Q, K, V
+        qkv_lora = torch.cat([q, k, v], dim=-1)
+        return qkv_lora
+
 
 
 class LayerScale(nn.Module):
@@ -58,7 +152,7 @@ class RPE(torch.nn.Module):
             + self.pos_bnd  # relative position to positive index
             + torch.arange(3, device=coord.device) * self.rpe_num  # x, y, z stride
         )
-         '''
+        '''
         先截断坐标，再计算索引
         - x维度： idx_x = clamped_x + pos_bnd + 0*rpe_num
         - y维度： idx_y = clamped_y + pos_bnd + 1*rpe_num
@@ -549,7 +643,7 @@ class Embedding(PointModule):
         return point
 
 
-@MODELS.register_module("PT-v3m2")
+@MODELS.register_module("PT-v3m3")
 class PointTransformerV3(PointModule):
     def __init__(
         self,
@@ -581,6 +675,10 @@ class PointTransformerV3(PointModule):
         mask_token=False,
         enc_mode=False,
         freeze_encoder=False,
+
+        lora_rank=4,          # LoRA 的秩，None 表示不使用 LoRA
+        lora_alpha=16,           # LoRA 缩放因子
+        lora_dropout=0.0,        # LoRA dropout
     ):
         super().__init__()
         self.num_stages = len(enc_depths)
@@ -598,6 +696,7 @@ class PointTransformerV3(PointModule):
         assert self.enc_mode or self.num_stages == len(dec_channels) + 1
         assert self.enc_mode or self.num_stages == len(dec_num_head) + 1
         assert self.enc_mode or self.num_stages == len(dec_patch_size) + 1
+
 
         # normalization layer
         ln_layer = nn.LayerNorm
@@ -711,12 +810,189 @@ class PointTransformerV3(PointModule):
                         name=f"block{i}",
                     )
                 self.dec.add(module=dec, name=f"dec{s}")
+
+
+        
+        self.apply(self._init_weights)
+
+        ##   lora
+        # 保存 LoRA 配置
+        self.lora_rank = lora_rank
+        self.lora_alpha = lora_alpha
+        self.lora_dropout = lora_dropout
+
+        if self.lora_rank is not None:
+            self._apply_lora()
+
         if self.freeze_encoder:
             for p in self.embedding.parameters():
                 p.requires_grad = False
-            for p in self.enc.parameters():
-                p.requires_grad = False
-        self.apply(self._init_weights)
+            for name, param in self.enc.named_parameters():
+                if 'lora_' not in name:
+                    param.requires_grad = False
+
+            for name, param in self.dec.named_parameters():
+                if 'lora_' not in name:
+                    param.requires_grad = False
+        
+
+
+    def _apply_lora(self):
+        '''
+        应用LoRA到模型的指定层
+        '''
+
+        # 处理 Encoder 部分
+        if hasattr(self, 'enc'):
+
+            for s in range(self.num_stages):
+                enc_name = f"enc{s}"
+
+
+                if hasattr(self.enc, enc_name):
+                    enc = self.enc._modules[enc_name]
+
+
+                    # process each block
+                    # 注意：直接遍历 enc 可能也依赖于 __iter__ 或 keys()，如果出问题，需要调整
+                    try:
+                        block_names = [n for n in enc if n.startswith("block")]
+                    except Exception as e_iter:
+                        print(f"Could not iterate enc {enc_name} directly: {e_iter}")
+                        # Fallback: 尝试遍历 _modules
+                        block_names = [n for n in enc._modules if n.startswith("block")]
+
+
+                    for i in range(len(block_names)):  # 使用 block_names 列表更清晰
+                        block_name = f"block{i}"
+                        print(f"Checking block: {block_name}")  # 打印当前检查的 block
+
+                        # --- 修改点2: 使用 hasattr 检查 block ---
+                        # if block_name in enc: # 原代码
+                        if hasattr(enc, block_name): # 修改后
+
+                            block = enc._modules[block_name] # 修改后 (或直接 enc.block_name 如果是属性)
+
+                            # process each layer in the block
+                            if hasattr(block.attn, "qkv"):
+
+                                block.attn.qkv = LoRAQKVLinear(
+                                    block.attn.qkv,
+                                    rank=self.lora_rank,
+                                    alpha=self.lora_alpha,
+                                    dropout=self.lora_dropout
+                                )
+
+                            if hasattr(block.attn, 'proj'):
+
+                                block.attn.proj = LoRALinear(
+                                    block.attn.proj,
+                                    rank=self.lora_rank,
+                                    alpha=self.lora_alpha,
+                                    dropout=self.lora_dropout
+                                )
+
+
+
+
+                            # 处理 MLP 层 (在 PointSequential 'mlp' -> '0' -> MLP -> fc1/fc2)
+
+                            if '0' in block.mlp._modules if hasattr(block.mlp, '_modules') else False: # 修改后
+                                # mlp = block.mlp[0] # 原代码
+                                mlp = block.mlp._modules['0'] # 修改后
+                                print(f"    Applying LoRALinear to {block_name}.mlp[0].fc1 and fc2")
+                                if hasattr(mlp, 'fc1'):
+                                    mlp.fc1 = LoRALinear(
+                                        mlp.fc1,
+                                        rank=self.lora_rank,
+                                        alpha=self.lora_alpha,
+                                        dropout=self.lora_dropout
+                                    )
+                                if hasattr(mlp, 'fc2'):
+                                    mlp.fc2 = LoRALinear(
+                                        mlp.fc2,
+                                        rank=self.lora_rank,
+                                        alpha=self.lora_alpha,
+                                        dropout=self.lora_dropout
+                                    )
+
+
+        # --- Decoder 部分 ---
+        if not self.enc_mode and hasattr(self, 'dec'):
+            try:
+                dec_stage_indices = list(range(self.num_stages - 1)) # [0, 1, 2, ...]
+            except:
+                # Fallback if num_stages is problematic in this context
+                # Try to infer from dec structure
+                try:
+                    # Assume dec keys are like 'dec0', 'dec1', ...
+                    dec_keys = [k for k in self.dec._modules.keys() if k.startswith('dec')]
+                    # Extract indices
+                    dec_stage_indices = [int(k.replace('dec', '')) for k in dec_keys]
+                    dec_stage_indices.sort(reverse=True) # reversed order
+                except Exception as e_infer:
+                    print(f"Could not determine decoder stage indices: {e_infer}")
+                    dec_stage_indices = [] # Skip decoder
+
+            for s in dec_stage_indices: # 使用推断出的索引
+                dec_name = f"dec{s}"
+
+                if hasattr(self.dec, dec_name):
+                    dec = self.dec._modules[dec_name]
+
+                    # 处理每个 block (同样修改访问方式)
+                    try:
+                        block_names = [n for n in dec if n.startswith("block")]
+                    except Exception as e_iter_dec:
+                        print(f"Could not iterate dec {dec_name} directly: {e_iter_dec}")
+                        block_names = [n for n in dec._modules if n.startswith("block")]
+
+                    for i in range(len(block_names)):
+                        block_name = f"block{i}"
+
+
+                        if hasattr(dec, block_name):
+                            block = dec._modules[block_name]
+
+                            # 处理注意力层的 qkv
+                            if hasattr(block.attn, 'qkv'):
+                                block.attn.qkv = LoRAQKVLinear(
+                                    block.attn.qkv,
+                                    rank=self.lora_rank,
+                                    alpha=self.lora_alpha,
+                                    dropout=self.lora_dropout
+                                )
+
+                            # 处理注意力层的 proj
+                            if hasattr(block.attn, 'proj'):
+                                block.attn.proj = LoRALinear(
+                                    block.attn.proj,
+                                    rank=self.lora_rank,
+                                    alpha=self.lora_alpha,
+                                    dropout=self.lora_dropout
+                                )
+
+                            # 处理 MLP 层 (同样修改访问方式)
+                            if '0' in block.mlp._modules if hasattr(block.mlp, '_modules') else False:
+                                mlp = block.mlp._modules['0']
+                                if hasattr(mlp, 'fc1'):
+                                    mlp.fc1 = LoRALinear(
+                                        mlp.fc1,
+                                        rank=self.lora_rank,
+                                        alpha=self.lora_alpha,
+                                        dropout=self.lora_dropout
+                                    )
+                                if hasattr(mlp, 'fc2'):
+                                    mlp.fc2 = LoRALinear(
+                                        mlp.fc2,
+                                        rank=self.lora_rank,
+                                        alpha=self.lora_alpha,
+                                        dropout=self.lora_dropout
+                                    )
+
+
+
+
 
     @staticmethod
     def _init_weights(module):
