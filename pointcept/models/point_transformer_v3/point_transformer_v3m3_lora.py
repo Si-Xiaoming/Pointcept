@@ -26,62 +26,80 @@ import math
 
 
 class LoRALinear(nn.Module):
-    """LoRA 适配层，用于替换 PTv3 中的线性层"""
+    """LoRA 适配层，保持原始权重名称以简化映射"""
+
     def __init__(self, linear_layer, rank=4, alpha=16, dropout=0.0):
         super().__init__()
+        # 保存原始线性层的参数
+        self.in_features = linear_layer.in_features
+        self.out_features = linear_layer.out_features
 
-        self.linear = linear_layer
-        d, k = linear_layer.weight.shape
-        
+        # 直接注册原始权重和偏置（保持名称不变）
+        self.weight = nn.Parameter(linear_layer.weight.data.clone())
+        if linear_layer.bias is not None:
+            self.bias = nn.Parameter(linear_layer.bias.data.clone())
+        else:
+            self.register_parameter('bias', None)
+
         # 冻结原始权重（关键步骤）
-        self.linear.weight.requires_grad = False
-        if self.linear.bias is not None:
-            self.linear.bias.requires_grad = False
-            
+        self.weight.requires_grad = False
+        if self.bias is not None:
+            self.bias.requires_grad = False
+
         # LoRA 参数
         self.rank = rank
         self.alpha = alpha
         self.scaling = alpha / rank  # 重要缩放因子
-        
+
         # 低秩分解矩阵
-        self.lora_A = nn.Parameter(torch.zeros((k, rank)))
-        self.lora_B = nn.Parameter(torch.zeros((rank, d)))
-        
+        self.lora_A = nn.Parameter(torch.zeros((self.in_features, rank)))
+        self.lora_B = nn.Parameter(torch.zeros((rank, self.out_features)))
+
         # 初始化 LoRA 参数
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B)
-        
+
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        
+
     def forward(self, x):
         # 原始线性变换
-        original_output = self.linear(x)
-        
+        original_output = nn.functional.linear(x, self.weight, self.bias)
+
         # LoRA 变换：x @ (A @ B) * scaling
         lora_output = self.dropout(x) @ self.lora_A @ self.lora_B
         lora_output = lora_output * self.scaling
-        
+
         return original_output + lora_output
 
+
 class LoRAQKVLinear(nn.Module):
-    """专门用于 QKV 线性层的 LoRA，只对 Q 和 V 进行 LoRA 适配"""
+    """专门用于 QKV 线性层的 LoRA，保持原始权重名称"""
+
     def __init__(self, qkv_linear_layer, rank=4, alpha=16, dropout=0.0):
         super().__init__()
-        self.qkv_linear = qkv_linear_layer
-        out_features, in_features = qkv_linear_layer.weight.shape
-        assert out_features % 3 == 0, "QKV linear layer output features must be divisible by 3"
-        self.dim = out_features // 3
+        # 保存原始线性层的参数
+        self.in_features = qkv_linear_layer.in_features
+        self.out_features = qkv_linear_layer.out_features
+        assert self.out_features % 3 == 0, "QKV linear layer output features must be divisible by 3"
+        self.dim = self.out_features // 3
+
+        # 直接注册原始权重和偏置
+        self.weight = nn.Parameter(qkv_linear_layer.weight.data.clone())
+        if qkv_linear_layer.bias is not None:
+            self.bias = nn.Parameter(qkv_linear_layer.bias.data.clone())
+        else:
+            self.register_parameter('bias', None)
 
         # 冻结原始权重
-        self.qkv_linear.weight.requires_grad = False
-        if self.qkv_linear.bias is not None:
-            self.qkv_linear.bias.requires_grad = False
+        self.weight.requires_grad = False
+        if self.bias is not None:
+            self.bias.requires_grad = False
 
         # LoRA 参数 for Q
         self.rank_q = rank
         self.alpha_q = alpha
         self.scaling_q = alpha / rank
-        self.lora_A_q = nn.Parameter(torch.zeros((in_features, rank)))
+        self.lora_A_q = nn.Parameter(torch.zeros((self.in_features, rank)))
         self.lora_B_q = nn.Parameter(torch.zeros((rank, self.dim)))
         nn.init.kaiming_uniform_(self.lora_A_q, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B_q)
@@ -90,7 +108,7 @@ class LoRAQKVLinear(nn.Module):
         self.rank_v = rank
         self.alpha_v = alpha
         self.scaling_v = alpha / rank
-        self.lora_A_v = nn.Parameter(torch.zeros((in_features, rank)))
+        self.lora_A_v = nn.Parameter(torch.zeros((self.in_features, rank)))
         self.lora_B_v = nn.Parameter(torch.zeros((rank, self.dim)))
         nn.init.kaiming_uniform_(self.lora_A_v, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B_v)
@@ -99,8 +117,8 @@ class LoRAQKVLinear(nn.Module):
 
     def forward(self, x):
         # 原始 QKV 变换
-        qkv = self.qkv_linear(x) # [..., 3*dim]
-        q, k, v = qkv.chunk(3, dim=-1) # [..., dim] each
+        qkv = nn.functional.linear(x, self.weight, self.bias)
+        q, k, v = qkv.chunk(3, dim=-1)
 
         # LoRA 变换 for Q
         lora_q = self.dropout(x) @ self.lora_A_q @ self.lora_B_q
@@ -115,7 +133,6 @@ class LoRAQKVLinear(nn.Module):
         # 合并 Q, K, V
         qkv_lora = torch.cat([q, k, v], dim=-1)
         return qkv_lora
-
 
 
 class LayerScale(nn.Module):

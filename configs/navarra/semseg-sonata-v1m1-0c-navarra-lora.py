@@ -7,7 +7,7 @@ mix_prob = 0.8
 clip_grad = 3.0
 empty_cache = False
 enable_amp = True
-num_points_per_step = 65536
+num_points_per_step = 655
 grid_size = 0.1
 weight = "/datasets/exp/model_best.pth"
 #weight = "/datasets/models/ft/model_last-std.pth"
@@ -68,7 +68,7 @@ model = dict(
 
 # scheduler settings
 
-optimizer = dict(type="AdamW", lr=0.002, weight_decay=0.02)
+optimizer = dict(type="AdamW", lr=0.0002, weight_decay=0.02)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=[0.0002, 0.0002, 0.0002],
