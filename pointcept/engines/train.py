@@ -234,6 +234,7 @@ class Trainer(TrainerBase):
 
     def build_model(self):
         model = build_model(self.cfg.model)
+
         if self.cfg.sync_bn:
             model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
         n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)

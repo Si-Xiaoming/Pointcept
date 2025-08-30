@@ -7,22 +7,24 @@ mix_prob = 0.8
 clip_grad = 3.0
 empty_cache = False
 enable_amp = True
-num_points_per_step = 655
+num_points_per_step = 65536
 grid_size = 0.1
-weight = "/datasets/exp/model_best.pth"
+weight = "/datasets/exp/student_backbone.pth"
+# weight = "/datasets//exp/default_lora828190/model/model_best.pth"
+# weight = "/datasets/exp/default_lora/dmh/model_last.pth"
 #weight = "/datasets/models/ft/model_last-std.pth"
 dataset_type = "NavarraDataset"
 # data_root = "/datasets/internship/unused_land_data/"
 data_root = "/datasets/ft_data/"
-save_path = "/datasets/exp/default_lora82819"
+save_path = "/datasets/exp/default_lora_encmode"
 
-epoch = 20 # 300
+epoch = 200 # 300
 eval_epoch = 10
 # model settings
 model = dict(
     type="DefaultSegmentorV3",
     num_classes=4,
-    backbone_out_channels=64,
+    backbone_out_channels=1232,
     backbone=dict(
         type="PT-v3m3",
         in_channels=6,
@@ -50,11 +52,11 @@ model = dict(
         upcast_softmax=False,
         traceable=False,
         mask_token=False,
-        enc_mode=False,
+        enc_mode=True,
         freeze_encoder=True,
 
-        lora_rank=4,  # LoRA 的秩，None 表示不使用 LoRA
-        lora_alpha=16,  # LoRA 缩放因子
+        lora_rank=8,  # LoRA 的秩，None 表示不使用 LoRA  4
+        lora_alpha=8,  # LoRA 缩放因子   16
         lora_dropout=0.0,  # LoRA dropout
     ),
     criteria=[
@@ -68,16 +70,16 @@ model = dict(
 
 # scheduler settings
 
-optimizer = dict(type="AdamW", lr=0.0002, weight_decay=0.02)
+optimizer = dict(type="AdamW", lr=0.002, weight_decay=0.02)
 scheduler = dict(
     type="OneCycleLR",
-    max_lr=[0.0002, 0.0002, 0.0002],
+    max_lr=[0.01, 0.002, 0.02],
     pct_start=0.05,
     anneal_strategy="cos",
     div_factor=10.0,
     final_div_factor=1000.0,
 )
-param_dicts = [dict(keyword="block", lr=0.0002), dict(keyword="lora_", lr=0.0001)]
+param_dicts = [dict(keyword="lora_", lr=0.001), dict(keyword="block", lr=0.0002)]
 
 
 
@@ -142,7 +144,7 @@ data = dict(
             dict(type="Copy", keys_dict={"segment": "origin_segment"}),
             dict(
                 type="GridSample",
-                grid_size=grid_size,
+                grid_size=grid_size*10,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -314,7 +316,9 @@ data = dict(
 hooks = [
     dict(
         type="CheckpointLoader",
-        keywords="module.student.backbone",
+        #keywords="module.student.backbone",
+        #replacement="module.backbone",
+        keywords="module",
         replacement="module.backbone",
     ),
     dict(type="IterationTimer", warmup_iter=2),

@@ -848,9 +848,10 @@ class PointTransformerV3(PointModule):
                 if 'lora_' not in name:
                     param.requires_grad = False
 
-            for name, param in self.dec.named_parameters():
-                if 'lora_' not in name:
-                    param.requires_grad = False
+            if not self.enc_mode:
+                for name, param in self.dec.named_parameters():
+                    if 'lora_' not in name:
+                        param.requires_grad = False
         
 
 
@@ -882,13 +883,11 @@ class PointTransformerV3(PointModule):
 
                     for i in range(len(block_names)):  # 使用 block_names 列表更清晰
                         block_name = f"block{i}"
-                        print(f"Checking block: {block_name}")  # 打印当前检查的 block
 
-                        # --- 修改点2: 使用 hasattr 检查 block ---
-                        # if block_name in enc: # 原代码
-                        if hasattr(enc, block_name): # 修改后
 
-                            block = enc._modules[block_name] # 修改后 (或直接 enc.block_name 如果是属性)
+                        if hasattr(enc, block_name):
+
+                            block = enc._modules[block_name]
 
                             # process each layer in the block
                             if hasattr(block.attn, "qkv"):
@@ -914,10 +913,8 @@ class PointTransformerV3(PointModule):
 
                             # 处理 MLP 层 (在 PointSequential 'mlp' -> '0' -> MLP -> fc1/fc2)
 
-                            if '0' in block.mlp._modules if hasattr(block.mlp, '_modules') else False: # 修改后
-                                # mlp = block.mlp[0] # 原代码
-                                mlp = block.mlp._modules['0'] # 修改后
-                                print(f"    Applying LoRALinear to {block_name}.mlp[0].fc1 and fc2")
+                            if '0' in block.mlp._modules if hasattr(block.mlp, '_modules') else False:
+                                mlp = block.mlp._modules['0']
                                 if hasattr(mlp, 'fc1'):
                                     mlp.fc1 = LoRALinear(
                                         mlp.fc1,
