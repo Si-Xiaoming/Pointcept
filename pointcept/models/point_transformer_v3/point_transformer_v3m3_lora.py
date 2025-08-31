@@ -932,7 +932,8 @@ class PointTransformerV3(PointModule):
 
 
         # --- Decoder 部分 ---
-        if not self.enc_mode and hasattr(self, 'dec'):
+        # if not self.enc_mode and hasattr(self, 'dec'):
+        if False:
             try:
                 dec_stage_indices = list(range(self.num_stages - 1)) # [0, 1, 2, ...]
             except:

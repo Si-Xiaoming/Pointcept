@@ -19,6 +19,7 @@ num_points_per_step = 300  # 65536
 grid_size = 0.1 # 0.02
 dataset_type = "NavarraDataset"
 data_root = "/datasets/navarra-test/"
+save_path = "/datasets/exp/lora_exp/default_ft_full_arg_no_lora"
 
 
 # model settings
@@ -116,12 +117,16 @@ transform = [
     dict(type="GridSample", grid_size=grid_size, hash_type="fnv", mode="train"),
     dict(type="Copy", keys_dict={"coord": "origin_coord"}),
     dict(
-        type="MultiViewGenerator",
+        # type="MultiViewGenerator",
+        # global_view_scale=(0.4, 1.0),
+        # local_view_scale=(0.1, 0.4),
+        type="PhysicalSizeMultiViewGeneratorBySize",
+        global_view_size=(15, 45),  # (40, 50)
+        local_view_size=(3, 15),  # (20, 30)
+
         view_keys=("coord", "origin_coord", "color"),
         global_view_num=2,
-        global_view_scale=(0.4, 1.0),
         local_view_num=4,
-        local_view_scale=(0.1, 0.4),
         global_shared_transform=[
             dict(
                 type="RandomColorJitter",
@@ -132,27 +137,36 @@ transform = [
                 p=0.8,
             ),
             dict(type="ChromaticTranslation", p=0.95, ratio=0.05),
+            dict(type="HeightNormalization",
+                         base_level="ground",
+                         max_height=50.0,
+                         ground_percentile=0.03),
             # dict(type="ChromaticJitter", p=0.95, std=0.05),
             # dict(type="NormalizeColor"),
         ],
         global_transform=[
             dict(type="CenterShift", apply_z=True),
-            dict(type="RandomScale", scale=[0.9, 1.1]),
-            dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.8),
+            dict(type="RandomScale", scale=[0.8, 1.2]),
+            # dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.8), [-0.1, 0.1]
+            dict(type="RandomRotate", angle=[-0.1, 0.1], axis="z", center=[0, 0, 0], p=0.8),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.8),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.8),
             dict(type="RandomFlip", p=0.5),
-            dict(type="RandomJitter", sigma=0.005, clip=0.02),
+            # dict(type="RandomJitter", sigma=0.005, clip=0.02),
+            dict(type="RandomJitter", sigma=0.05, clip=0.5),
             # dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
         ],
         local_transform=[
             dict(type="CenterShift", apply_z=True),
-            dict(type="RandomScale", scale=[0.9, 1.1]),
-            dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.8),
+            dict(type="RandomScale", scale=[0.8, 1.2]),
+            # dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.8), [-0.1, 0.1]
+            dict(type="RandomRotate", angle=[-0.1, 0.1], axis="z", center=[0, 0, 0], p=0.8),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.8),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.8),
             dict(type="RandomFlip", p=0.5),
-            dict(type="RandomJitter", sigma=0.005, clip=0.02),
+            # dict(type="RandomJitter", sigma=0.005, clip=0.02),
+            dict(type="RandomJitter", sigma=0.05, clip=0.5),
+
             # dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
             # dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
             dict(

@@ -9,12 +9,12 @@ empty_cache = False
 enable_amp = True
 num_points_per_step = 300
 grid_size = 0.1
-weight = "/datasets/exp/model_best.pth"
+weight = "/datasets/exp/lora_exp/models/model_last.pth"
 #weight = "/datasets/models/ft/model_last-std.pth"
 dataset_type = "NavarraDataset"
-# data_root = "/datasets/internship/unused_land_data/"
-data_root = "/datasets/ft_data/"
-save_path = "/datasets/exp/default_ft"
+data_root = "/datasets/internship/unused_land_data/"
+# data_root = "/datasets/ft_data/"
+save_path = "/datasets/exp/default_ft_full_arg_no_lora"
 
 epoch = 20 # 300
 eval_epoch = 10

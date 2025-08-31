@@ -38,7 +38,7 @@ def main_process(dir_path, data_name):
 if __name__ == "__main__":
     # dir_path = "/datasets/navarra-test2/processed/test/build3"
     # dir_path = "/datasets/exp/default_tcr/result"
-    dir_path = "/datasets/exp/default_lora828190/result"
+    dir_path = "/datasets/exp/lora_exp/default_ft_full_arg_no_lora/result"
 
     data_name = "build3_processed" # build3_processed   gr1_processed   ground_processed
     main_process(dir_path, data_name)

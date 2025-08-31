@@ -407,13 +407,17 @@ class ChromaticAutoContrast(object):
 
 @TRANSFORMS.register_module()
 class ChromaticTranslation(object):
-    def __init__(self, p=0.95, ratio=0.05):
+    def __init__(self, p=0.95, ratio=0.05, input_range="normalized"):
         self.p = p
         self.ratio = ratio
+        self.input_range = input_range
 
     def __call__(self, data_dict):
         if "color" in data_dict.keys() and np.random.rand() < self.p:
-            tr = (np.random.rand(1, 3) - 0.5) * 255 * 2 * self.ratio
+            if self.input_range == "normalized":
+                tr = (np.random.rand(1, 3) - 0.5) * 2 * self.ratio
+            else:
+                tr = (np.random.rand(1, 3) - 0.5) * 255 * 2 * self.ratio
             data_dict["color"][:, :3] = np.clip(tr + data_dict["color"][:, :3], 0, 255)
         return data_dict
 
@@ -1061,13 +1065,18 @@ class MultiViewGenerator(object):
     def __call__(self, data_dict):
         coord = data_dict["coord"]
         point = self.global_shared_transform(copy.deepcopy(data_dict))
+
+        # create z mask
         z_min = coord[:, 2].min()
         z_max = coord[:, 2].max()
         z_min_ = z_min + (z_max - z_min) * self.center_height_scale[0]
         z_max_ = z_min + (z_max - z_min) * self.center_height_scale[1]
         center_mask = np.logical_and(coord[:, 2] >= z_min_, coord[:, 2] <= z_max_)
+
+
         # get major global view
         major_center = coord[np.random.choice(np.where(center_mask)[0])]
+        # select a center point based on coord
         major_view = self.get_view(point, major_center, self.global_view_scale)
         major_coord = major_view["coord"]
         # get global views: restrict the center of left global view within the major global view
@@ -1077,7 +1086,7 @@ class MultiViewGenerator(object):
                     point=point,
                     center=major_coord[np.random.randint(major_coord.shape[0])],
                     scale=self.global_view_scale,
-                )
+                ) # select a center point based on major_coord
                 for _ in range(self.global_view_num - 1)
             ]
         else:
@@ -1192,3 +1201,480 @@ class Compose(object):
         for t in self.transforms:
             data_dict = t(data_dict)
         return data_dict
+
+
+@TRANSFORMS.register_module()
+class HeightNormalization(object):
+    """
+    Args:
+        base_level (str): Method to estimate ground level. Options:
+            - 'ground': Use ground points detection (default)
+            - 'min': Use minimum z value as ground
+            - 'statistical': Use statistical filtering to estimate ground
+        max_height (float): Maximum height for normalization (meters)
+        apply_z (bool): Whether to apply height normalization
+        ground_percentile (float): Percentile for ground estimation (for statistical method)
+        height_threshold (float): Height threshold for ground filtering (meters)
+    """
+
+    def __init__(self,
+                 base_level="ground",
+                 max_height=50.0,
+                 apply_z=True,
+                 ground_percentile=0.05,
+                 height_threshold=2.0):
+        self.base_level = base_level
+        self.max_height = max_height
+        self.apply_z = apply_z
+        self.ground_percentile = ground_percentile
+        self.height_threshold = height_threshold
+
+    def estimate_ground(self, coord):
+        """Estimate ground height using different methods"""
+        if self.base_level == "min":
+            # Simple min method - just use minimum z value
+            return np.min(coord[:, 2])
+
+        elif self.base_level == "statistical":
+            # Statistical filtering - take lowest X% of points as ground
+            sorted_z = np.sort(coord[:, 2])
+            ground_idx = int(len(sorted_z) * self.ground_percentile)
+            return sorted_z[ground_idx]
+
+        elif self.base_level == "ground":
+            # More sophisticated ground estimation
+            # This is a simplified version of statistical ground filtering
+            z_values = coord[:, 2]
+            z_min = np.min(z_values)
+
+            # Create height histogram
+            hist, bin_edges = np.histogram(z_values, bins=50)
+
+            # Find the first significant peak (likely ground)
+            peak_idx = np.argmax(hist[:len(hist) // 3])  # Only look at lower part
+            ground_height = (bin_edges[peak_idx] + bin_edges[peak_idx + 1]) / 2
+
+            return ground_height
+
+        else:
+            raise ValueError(f"Unknown base_level: {self.base_level}")
+
+    def __call__(self, data_dict):
+        if "coord" not in data_dict or not self.apply_z:
+            return data_dict
+
+        coord = data_dict["coord"]
+
+        # Estimate ground height
+        ground_height = self.estimate_ground(coord)
+
+        # Create copy of original coordinates for reference
+        if "origin_coord" not in data_dict:
+            data_dict["origin_coord"] = coord.copy()
+
+        # Calculate relative height
+        relative_height = coord[:, 2] - ground_height
+
+        # Apply height threshold - important for removing noise in ground estimation
+        # Points below ground are set to 0 (they're likely noise)
+        relative_height = np.maximum(relative_height, 0)
+
+        # Normalize to [0, 1] range if max_height is specified
+        if self.max_height > 0:
+            normalized_height = np.minimum(relative_height / self.max_height, 1.0)
+            # Replace z-coordinate with normalized height
+            coord[:, 2] = normalized_height
+        else:
+            # Just use relative height without normalization
+            coord[:, 2] = relative_height
+
+        # Store ground height for potential use in downstream tasks
+        data_dict["ground_height"] = ground_height
+
+        return data_dict
+
+
+@TRANSFORMS.register_module()
+class PhysicalSizeMultiViewGeneratorBySize(object):
+    """
+    Args:
+        global_view_num (int): Number of global views to generate
+        global_view_size (tuple): Physical size range for global views (min_size, max_size) in meters
+        local_view_num (int): Number of local views to generate
+        local_view_size (tuple): Physical size range for local views (min_size, max_size) in meters
+        global_shared_transform (list): Transforms applied to all views before cropping
+        global_transform (list): Transforms applied to each global view
+        local_transform (list): Transforms applied to each local view
+        max_size (int): Maximum number of points per view
+        center_height_scale (tuple): Height range for selecting center points
+        shared_global_view (bool): Whether to share the same global view
+        view_keys (tuple): Keys to include in views
+        shape_type (str): 'cube' for cubic regions, 'sphere' for spherical regions
+    """
+
+    def __init__(
+            self,
+            global_view_num=2,
+            global_view_size=(10.0, 30.0),  # 物理尺寸范围(米)，而非比例
+            local_view_num=4,
+            local_view_size=(2.0, 10.0),  # 物理尺寸范围(米)，而非比例
+            global_shared_transform=None,
+            global_transform=None,
+            local_transform=None,
+            max_size=65536,
+            center_height_scale=(0, 1),
+            shared_global_view=False,
+            view_keys=("coord", "origin_coord", "intensity"),
+            shape_type="cube",  # 'cube'或'sphere'
+    ):
+        self.global_view_num = global_view_num
+        self.global_view_size = global_view_size
+        self.local_view_num = local_view_num
+        self.local_view_size = local_view_size
+        self.global_shared_transform = Compose(global_shared_transform)
+        self.global_transform = Compose(global_transform)
+        self.local_transform = Compose(local_transform)
+        self.max_size = max_size
+        self.center_height_scale = center_height_scale
+        self.shared_global_view = shared_global_view
+        self.view_keys = view_keys
+        self.shape_type = shape_type
+        assert "coord" in view_keys
+
+    def get_view_by_size(self, point, center, size):
+        """Get view based on physical size (meters) rather than ratio"""
+        coord = point["coord"]
+        # 计算距离中心点在指定物理尺寸范围内的点
+
+        if self.shape_type == "cube":
+            # 立方体区域：|x-cx| < size/2, |y-cy| < size/2
+            x_mask = np.abs(coord[:, 0] - center[0]) < size / 2
+            y_mask = np.abs(coord[:, 1] - center[1]) < size / 2
+            mask = np.logical_and(x_mask, y_mask)
+        else:  # sphere
+            # 球形区域：sqrt((x-cx)^2 + (y-cy)^2) < size/2
+            distances = np.sqrt(np.sum((coord[:, :2] - center[:2]) ** 2, axis=1))
+            mask = distances < size / 2
+
+        # 应用高度过滤（可选）
+        if len(coord) > 0 and coord.shape[1] >= 3:
+            z_min = np.min(coord[:, 2])
+            z_max = np.max(coord[:, 2])
+            z_range = z_max - z_min
+            z_min_ = z_min + z_range * self.center_height_scale[0]
+            z_max_ = z_min + z_range * self.center_height_scale[1]
+            z_mask = np.logical_and(coord[:, 2] >= z_min_, coord[:, 2] <= z_max_)
+            mask = np.logical_and(mask, z_mask)
+
+        index = np.where(mask)[0]
+
+        # 如果点太多，随机采样到max_size
+        if len(index) > self.max_size:
+            index = np.random.choice(index, self.max_size, replace=False)
+
+        # 如果点太少，返回空视图（由调用者处理）
+        if len(index) == 0:
+            return None
+
+        view = dict(index=index)
+        for key in point.keys():
+            if key in self.view_keys:
+                view[key] = point[key][index]
+
+        if "index_valid_keys" in point.keys():
+            # inherit index_valid_keys from point
+            view["index_valid_keys"] = point["index_valid_keys"]
+        return view
+
+    def __call__(self, data_dict):
+        coord = data_dict["coord"]
+        point = self.global_shared_transform(copy.deepcopy(data_dict))
+        z_min = coord[:, 2].min()
+        z_max = coord[:, 2].max()
+        z_min_ = z_min + (z_max - z_min) * self.center_height_scale[0]
+        z_max_ = z_min + (z_max - z_min) * self.center_height_scale[1]
+        center_mask = np.logical_and(coord[:, 2] >= z_min_, coord[:, 2] <= z_max_)
+
+        # 选择一个合理的中心点（避免边缘）
+        valid_indices = np.where(center_mask)[0]
+        if len(valid_indices) == 0:
+            # 没有有效点，返回原始数据（或处理错误）
+            return data_dict
+
+        # 确保中心点不在边缘（至少留出最大视图尺寸的一半）
+        max_global_size = max(self.global_view_size)
+        edge_buffer = max_global_size / 2
+        x_min, y_min = np.min(coord[:, :2], axis=0)
+        x_max, y_max = np.max(coord[:, :2], axis=0)
+
+        # 过滤掉靠近边缘的点
+        edge_mask = np.logical_and(
+            np.logical_and(coord[:, 0] >= x_min + edge_buffer, coord[:, 0] <= x_max - edge_buffer),
+            np.logical_and(coord[:, 1] >= y_min + edge_buffer, coord[:, 1] <= y_max - edge_buffer)
+        )
+        center_mask = np.logical_and(center_mask, edge_mask)
+
+        valid_indices = np.where(center_mask)[0]
+        if len(valid_indices) == 0:
+            # 如果没有足够远离边缘的点，放宽条件
+            valid_indices = np.where(np.logical_and(coord[:, 2] >= z_min_, coord[:, 2] <= z_max_))[0]
+
+        if len(valid_indices) == 0:
+            return data_dict
+
+        # get major global view
+        major_center = coord[np.random.choice(valid_indices)]
+        # 随机选择一个全局视图尺寸
+        global_size = np.random.uniform(*self.global_view_size)
+        major_view = self.get_view_by_size(point, major_center, global_size)
+
+        if major_view is None:
+            # 如果major_view为空，尝试重新选择中心点
+            return data_dict
+
+        major_coord = major_view["coord"]
+
+        # get global views: restrict the center of left global view within the major global view
+        global_views = []
+        for _ in range(self.global_view_num - 1):
+            if major_coord.shape[0] == 0:
+                break
+            center_idx = np.random.randint(major_coord.shape[0])
+            center = major_coord[center_idx]
+            size = np.random.uniform(*self.global_view_size)
+            view = self.get_view_by_size(point, center, size)
+            if view is not None:
+                global_views.append(view)
+
+        if len(global_views) < self.global_view_num - 1:
+            # 如果无法生成足够的全局视图，用major_view填充
+            while len(global_views) < self.global_view_num - 1:
+                global_views.append({key: value.copy() for key, value in major_view.items()})
+
+        global_views = [major_view] + global_views
+
+        # get local views: restrict the center of local view within the major global view
+        cover_mask = np.zeros_like(major_view["index"], dtype=bool)
+        local_views = []
+        for i in range(self.local_view_num):
+            if sum(~cover_mask) == 0:
+                # reset cover mask if all points are sampled
+                cover_mask[:] = False
+
+            if major_coord.shape[0] == 0:
+                break
+
+            # 优先选择未覆盖区域的点
+            available_indices = np.where(~cover_mask)[0]
+            if len(available_indices) == 0:
+                available_indices = np.arange(major_coord.shape[0])
+
+            center_idx = np.random.choice(available_indices)
+            center = major_coord[center_idx]
+            size = np.random.uniform(*self.local_view_size)
+            local_view = self.get_view_by_size(point, center, size)
+
+            if local_view is not None:
+                local_views.append(local_view)
+                # 更新覆盖掩码
+                local_indices = local_view["index"]
+                major_indices = major_view["index"]
+                # 找到local_view在major_view中的索引
+                mask = np.isin(major_indices, local_indices)
+                cover_mask[mask] = True
+
+        # augmentation and concat
+        view_dict = {}
+        for global_view in global_views:
+            if global_view is None:
+                continue
+            global_view.pop("index")
+            global_view = self.global_transform(global_view)
+            for key in self.view_keys:
+                if f"global_{key}" in view_dict.keys():
+                    view_dict[f"global_{key}"].append(global_view[key])
+                else:
+                    view_dict[f"global_{key}"] = [global_view[key]]
+
+        if "global_coord" in view_dict and len(view_dict["global_coord"]) > 0:
+            view_dict["global_offset"] = np.cumsum(
+                [data.shape[0] for data in view_dict["global_coord"]]
+            )
+
+        for local_view in local_views:
+            if local_view is None:
+                continue
+            local_view.pop("index")
+            local_view = self.local_transform(local_view)
+            for key in self.view_keys:
+                if f"local_{key}" in view_dict.keys():
+                    view_dict[f"local_{key}"].append(local_view[key])
+                else:
+                    view_dict[f"local_{key}"] = [local_view[key]]
+
+        if "local_coord" in view_dict and len(view_dict["local_coord"]) > 0:
+            view_dict["local_offset"] = np.cumsum(
+                [data.shape[0] for data in view_dict["local_coord"]]
+            )
+
+        for key in view_dict.keys():
+            if "offset" not in key and len(view_dict[key]) > 0:
+                view_dict[key] = np.concatenate(view_dict[key], axis=0)
+
+        data_dict.update(view_dict)
+        return data_dict
+
+
+@TRANSFORMS.register_module()
+class DensityAdaptivePhysicalSizeMultiViewGenerator(object):
+    """
+    Args:
+        global_view_num (int): Number of global views to generate
+        global_view_size (tuple): Physical size range for global views (min_size, max_size) in meters
+        local_view_num (int): Number of local views to generate
+        local_view_size (tuple): Physical size range for local views (min_size, max_size) in meters
+        global_shared_transform (list): Transforms applied to all views before cropping
+        global_transform (list): Transforms applied to each global view
+        local_transform (list): Transforms applied to each local view
+        max_size (int): Maximum number of points per view
+        center_height_scale (tuple): Height range for selecting center points
+        shared_global_view (bool): Whether to share the same global view
+        view_keys (tuple): Keys to include in views
+        shape_type (str): 'cube' for cubic regions, 'sphere' for spherical regions
+        density_variation (tuple): Range of density variation to simulate (min, max)
+        density_aware_sampling (bool): Whether to use density-aware sampling
+    """
+     def __init__(
+            self,
+            global_view_num=2,
+            global_view_size=(10.0, 30.0),
+            local_view_num=4,
+            local_view_size=(2.0, 10.0),
+            global_shared_transform=None,
+            global_transform=None,
+            local_transform=None,
+            max_size=65536,
+            center_height_scale=(0, 1),
+            shared_global_view=False,
+            view_keys=("coord", "origin_coord", "intensity"),
+            shape_type="cube",
+            # 新增密度相关参数
+            density_variation=(0.5, 1.5),  # 密度变化范围
+            density_aware_sampling=True,
+            target_density=10.0,  # 目标密度(点/m²)
+    ):
+        # 保留原有初始化
+        self.global_view_num = global_view_num
+        self.global_view_size = global_view_size
+        self.local_view_num = local_view_num
+        self.local_view_size = local_view_size
+        self.global_shared_transform = Compose(global_shared_transform)
+        self.global_transform = Compose(global_transform)
+        self.local_transform = Compose(local_transform)
+        self.max_size = max_size
+        self.center_height_scale = center_height_scale
+        self.shared_global_view = shared_global_view
+        self.view_keys = view_keys
+        self.shape_type = shape_type
+        assert "coord" in view_keys
+        
+        # 添加密度相关参数
+        self.density_variation = density_variation
+        self.density_aware_sampling = density_aware_sampling
+        self.target_density = target_density
+    
+    def estimate_local_density(self, coord, center, size):
+        """Estimate local point density around a center point"""
+        # 获取指定区域内的点
+        if self.shape_type == "cube":
+            x_mask = np.abs(coord[:, 0] - center[0]) < size / 2
+            y_mask = np.abs(coord[:, 1] - center[1]) < size / 2
+            mask = np.logical_and(x_mask, y_mask)
+        else:  # sphere
+            distances = np.sqrt(np.sum((coord[:, :2] - center[:2]) ** 2, axis=1))
+            mask = distances < size / 2
+            
+        local_points = coord[mask]
+        area = np.pi * (size / 2) ** 2 if self.shape_type == "sphere" else size ** 2
+        density = len(local_points) / area if area > 0 else 0
+        return density, mask
+    def density_aware_sample(self, indices, current_density, target_density, max_points=None):
+        """Sample points based on density to achieve target density"""
+        if not self.density_aware_sampling or current_density <= 0 or len(indices) == 0:
+            if max_points and len(indices) > max_points:
+                return np.random.choice(indices, max_points, replace=False)
+            return indices
+            
+        # 计算采样率：如果当前密度高于目标密度，则下采样；如果低于，则尝试保留所有点
+        sample_rate = min(1.0, target_density / current_density)
+        
+        # 如果需要下采样
+        if sample_rate < 1.0:
+            num_to_sample = int(len(indices) * sample_rate)
+            if max_points and num_to_sample > max_points:
+                num_to_sample = max_points
+            return np.random.choice(indices, num_to_sample, replace=False)
+        # 如果需要上采样（简单复制，实际应用中可能需要更复杂的上采样方法）
+        elif sample_rate > 1.0 and len(indices) < self.max_size:
+            num_to_add = min(int(len(indices) * (sample_rate - 1.0)), self.max_size - len(indices))
+            if num_to_add > 0 and max_points and len(indices) + num_to_add > max_points:
+                num_to_add = max_points - len(indices)
+            if num_to_add > 0:
+                additional_indices = np.random.choice(indices, num_to_add, replace=True)
+                return np.concatenate([indices, additional_indices])
+                
+        if max_points and len(indices) > max_points:
+            return np.random.choice(indices, max_points, replace=False)
+            
+        return indices
+
+    def get_view_by_size(self, point, center, size):
+        """Get view based on physical size with density adaptation"""
+        coord = point["coord"]
+        
+        # 1. 首先估计局部密度
+        current_density, mask = self.estimate_local_density(coord, center, size)
+        indices = np.where(mask)[0]
+        
+        if len(indices) == 0:
+            return None
+            
+        # 2. 应用高度过滤
+        if coord.shape[1] >= 3:
+            z_values = coord[indices, 2]
+            z_min = np.min(z_values) if len(z_values) > 0 else 0
+            z_max = np.max(z_values) if len(z_values) > 0 else 0
+            z_range = z_max - z_min
+            z_min_ = z_min + z_range * self.center_height_scale[0]
+            z_max_ = z_min + z_range * self.center_height_scale[1]
+            z_mask = np.logical_and(coord[indices, 2] >= z_min_, coord[indices, 2] <= z_max_)
+            indices = indices[z_mask]
+            
+        if len(indices) == 0:
+            return None
+            
+        # 3. 密度感知采样 - 关键步骤
+        if self.density_variation and self.density_aware_sampling:
+            # 在训练时应用密度变化，模拟不同密度场景
+            density_factor = np.random.uniform(*self.density_variation)
+            target_density = self.target_density * density_factor
+            indices = self.density_aware_sample(indices, current_density, target_density, self.max_size)
+            
+        # 4. 确保不超过max_size
+        if len(indices) > self.max_size:
+            indices = np.random.choice(indices, self.max_size, replace=False)
+            
+        # 5. 创建视图
+        view = dict(index=indices)
+        for key in point.keys():
+            if key in self.view_keys:
+                view[key] = point[key][indices]
+
+        if "index_valid_keys" in point.keys():
+            view["index_valid_keys"] = point["index_valid_keys"]
+            
+        return view
+
+    
+
+
