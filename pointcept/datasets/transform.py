@@ -1296,22 +1296,6 @@ class HeightNormalization(object):
 
 @TRANSFORMS.register_module()
 class PhysicalSizeMultiViewGeneratorBySize(object):
-    """
-    Args:
-        global_view_num (int): Number of global views to generate
-        global_view_size (tuple): Physical size range for global views (min_size, max_size) in meters
-        local_view_num (int): Number of local views to generate
-        local_view_size (tuple): Physical size range for local views (min_size, max_size) in meters
-        global_shared_transform (list): Transforms applied to all views before cropping
-        global_transform (list): Transforms applied to each global view
-        local_transform (list): Transforms applied to each local view
-        max_size (int): Maximum number of points per view
-        center_height_scale (tuple): Height range for selecting center points
-        shared_global_view (bool): Whether to share the same global view
-        view_keys (tuple): Keys to include in views
-        shape_type (str): 'cube' for cubic regions, 'sphere' for spherical regions
-    """
-
     def __init__(
             self,
             global_view_num=2,
@@ -1527,24 +1511,7 @@ class PhysicalSizeMultiViewGeneratorBySize(object):
 
 @TRANSFORMS.register_module()
 class DensityAdaptivePhysicalSizeMultiViewGenerator(object):
-    """
-    Args:
-        global_view_num (int): Number of global views to generate
-        global_view_size (tuple): Physical size range for global views (min_size, max_size) in meters
-        local_view_num (int): Number of local views to generate
-        local_view_size (tuple): Physical size range for local views (min_size, max_size) in meters
-        global_shared_transform (list): Transforms applied to all views before cropping
-        global_transform (list): Transforms applied to each global view
-        local_transform (list): Transforms applied to each local view
-        max_size (int): Maximum number of points per view
-        center_height_scale (tuple): Height range for selecting center points
-        shared_global_view (bool): Whether to share the same global view
-        view_keys (tuple): Keys to include in views
-        shape_type (str): 'cube' for cubic regions, 'sphere' for spherical regions
-        density_variation (tuple): Range of density variation to simulate (min, max)
-        density_aware_sampling (bool): Whether to use density-aware sampling
-    """
-     def __init__(
+        def __init__(
             self,
             global_view_num=2,
             global_view_size=(10.0, 30.0),
@@ -1562,8 +1529,281 @@ class DensityAdaptivePhysicalSizeMultiViewGenerator(object):
             density_variation=(0.5, 1.5),  # 密度变化范围
             density_aware_sampling=True,
             target_density=10.0,  # 目标密度(点/m²)
+        ):
+            # 保留原有初始化
+            self.global_view_num = global_view_num
+            self.global_view_size = global_view_size
+            self.local_view_num = local_view_num
+            self.local_view_size = local_view_size
+            self.global_shared_transform = Compose(global_shared_transform)
+            self.global_transform = Compose(global_transform)
+            self.local_transform = Compose(local_transform)
+            self.max_size = max_size
+            self.center_height_scale = center_height_scale
+            self.shared_global_view = shared_global_view
+            self.view_keys = view_keys
+            self.shape_type = shape_type
+            assert "coord" in view_keys
+
+            # 添加密度相关参数
+            self.density_variation = density_variation
+            self.density_aware_sampling = density_aware_sampling
+            self.target_density = target_density
+
+        def estimate_local_density(self, coord, center, size):
+            """Estimate local point density around a center point"""
+            # 获取指定区域内的点
+            if self.shape_type == "cube":
+                x_mask = np.abs(coord[:, 0] - center[0]) < size / 2
+                y_mask = np.abs(coord[:, 1] - center[1]) < size / 2
+                mask = np.logical_and(x_mask, y_mask)
+            else:  # sphere
+                distances = np.sqrt(np.sum((coord[:, :2] - center[:2]) ** 2, axis=1))
+                mask = distances < size / 2
+
+            local_points = coord[mask]
+            area = np.pi * (size / 2) ** 2 if self.shape_type == "sphere" else size ** 2
+            density = len(local_points) / area if area > 0 else 0
+            return density, mask
+        def density_aware_sample(self, indices, current_density, target_density, max_points=None):
+            """Sample points based on density to achieve target density"""
+            if not self.density_aware_sampling or current_density <= 0 or len(indices) == 0:
+                if max_points and len(indices) > max_points:
+                    return np.random.choice(indices, max_points, replace=False)
+                return indices
+
+            # 计算采样率：如果当前密度高于目标密度，则下采样；如果低于，则尝试保留所有点
+            sample_rate = min(1.0, target_density / current_density)
+
+            # 如果需要下采样
+            if sample_rate < 1.0:
+                num_to_sample = int(len(indices) * sample_rate)
+                if max_points and num_to_sample > max_points:
+                    num_to_sample = max_points
+                return np.random.choice(indices, num_to_sample, replace=False)
+            # 如果需要上采样（简单复制，实际应用中可能需要更复杂的上采样方法）
+            elif sample_rate > 1.0 and len(indices) < self.max_size:
+                num_to_add = min(int(len(indices) * (sample_rate - 1.0)), self.max_size - len(indices))
+                if num_to_add > 0 and max_points and len(indices) + num_to_add > max_points:
+                    num_to_add = max_points - len(indices)
+                if num_to_add > 0:
+                    additional_indices = np.random.choice(indices, num_to_add, replace=True)
+                    return np.concatenate([indices, additional_indices])
+
+            if max_points and len(indices) > max_points:
+                return np.random.choice(indices, max_points, replace=False)
+
+            return indices
+
+        def get_view_by_size(self, point, center, size):
+            """Get view based on physical size with density adaptation"""
+            coord = point["coord"]
+
+            # 1. 首先估计局部密度
+            current_density, mask = self.estimate_local_density(coord, center, size)
+            indices = np.where(mask)[0]
+
+            if len(indices) == 0:
+                return None
+
+            # 2. 应用高度过滤
+            if coord.shape[1] >= 3:
+                z_values = coord[indices, 2]
+                z_min = np.min(z_values) if len(z_values) > 0 else 0
+                z_max = np.max(z_values) if len(z_values) > 0 else 0
+                z_range = z_max - z_min
+                z_min_ = z_min + z_range * self.center_height_scale[0]
+                z_max_ = z_min + z_range * self.center_height_scale[1]
+                z_mask = np.logical_and(coord[indices, 2] >= z_min_, coord[indices, 2] <= z_max_)
+                indices = indices[z_mask]
+
+            if len(indices) == 0:
+                return None
+
+            # 3. 密度感知采样 - 关键步骤
+            if self.density_variation and self.density_aware_sampling:
+                # 在训练时应用密度变化，模拟不同密度场景
+                density_factor = np.random.uniform(*self.density_variation)
+                target_density = self.target_density * density_factor
+                indices = self.density_aware_sample(indices, current_density, target_density, self.max_size)
+
+            # 4. 确保不超过max_size
+            if len(indices) > self.max_size:
+                indices = np.random.choice(indices, self.max_size, replace=False)
+
+            # 5. 创建视图
+            view = dict(index=indices)
+            for key in point.keys():
+                if key in self.view_keys:
+                    view[key] = point[key][indices]
+
+            if "index_valid_keys" in point.keys():
+                view["index_valid_keys"] = point["index_valid_keys"]
+
+            return view
+
+        def __call__(self, data_dict):
+            coord = data_dict["coord"]
+            point = self.global_shared_transform(copy.deepcopy(data_dict))
+            z_min = coord[:, 2].min()
+            z_max = coord[:, 2].max()
+            z_min_ = z_min + (z_max - z_min) * self.center_height_scale[0]
+            z_max_ = z_min + (z_max - z_min) * self.center_height_scale[1]
+            center_mask = np.logical_and(coord[:, 2] >= z_min_, coord[:, 2] <= z_max_)
+
+            # 选择一个合理的中心点（避免边缘）
+            valid_indices = np.where(center_mask)[0]
+            if len(valid_indices) == 0:
+                # 没有有效点，返回原始数据（或处理错误）
+                return data_dict
+
+            # 确保中心点不在边缘（至少留出最大视图尺寸的一半）
+            max_global_size = max(self.global_view_size)
+            edge_buffer = max_global_size / 2
+            x_min, y_min = np.min(coord[:, :2], axis=0)
+            x_max, y_max = np.max(coord[:, :2], axis=0)
+
+            # 过滤掉靠近边缘的点
+            edge_mask = np.logical_and(
+                np.logical_and(coord[:, 0] >= x_min + edge_buffer, coord[:, 0] <= x_max - edge_buffer),
+                np.logical_and(coord[:, 1] >= y_min + edge_buffer, coord[:, 1] <= y_max - edge_buffer)
+            )
+            center_mask = np.logical_and(center_mask, edge_mask)
+
+            valid_indices = np.where(center_mask)[0]
+            if len(valid_indices) == 0:
+                # 如果没有足够远离边缘的点，放宽条件
+                valid_indices = np.where(np.logical_and(coord[:, 2] >= z_min_, coord[:, 2] <= z_max_))[0]
+
+            if len(valid_indices) == 0:
+                return data_dict
+
+            # get major global view
+            major_center = coord[np.random.choice(valid_indices)]
+            # 随机选择一个全局视图尺寸
+            global_size = np.random.uniform(*self.global_view_size)
+            major_view = self.get_view_by_size(point, major_center, global_size)
+
+            if major_view is None:
+                # 如果major_view为空，尝试重新选择中心点
+                return data_dict
+
+            major_coord = major_view["coord"]
+
+            # get global views: restrict the center of left global view within the major global view
+            global_views = []
+            for _ in range(self.global_view_num - 1):
+                if major_coord.shape[0] == 0:
+                    break
+                center_idx = np.random.randint(major_coord.shape[0])
+                center = major_coord[center_idx]
+                size = np.random.uniform(*self.global_view_size)
+                view = self.get_view_by_size(point, center, size)
+                if view is not None:
+                    global_views.append(view)
+
+            if len(global_views) < self.global_view_num - 1:
+                # 如果无法生成足够的全局视图，用major_view填充
+                while len(global_views) < self.global_view_num - 1:
+                    global_views.append({key: value.copy() for key, value in major_view.items()})
+
+            global_views = [major_view] + global_views
+
+            # get local views: restrict the center of local view within the major global view
+            cover_mask = np.zeros_like(major_view["index"], dtype=bool)
+            local_views = []
+            for i in range(self.local_view_num):
+                if sum(~cover_mask) == 0:
+                    # reset cover mask if all points are sampled
+                    cover_mask[:] = False
+
+                if major_coord.shape[0] == 0:
+                    break
+
+                # 优先选择未覆盖区域的点
+                available_indices = np.where(~cover_mask)[0]
+                if len(available_indices) == 0:
+                    available_indices = np.arange(major_coord.shape[0])
+
+                center_idx = np.random.choice(available_indices)
+                center = major_coord[center_idx]
+                size = np.random.uniform(*self.local_view_size)
+                local_view = self.get_view_by_size(point, center, size)
+
+                if local_view is not None:
+                    local_views.append(local_view)
+                    # 更新覆盖掩码
+                    local_indices = local_view["index"]
+                    major_indices = major_view["index"]
+                    # 找到local_view在major_view中的索引
+                    mask = np.isin(major_indices, local_indices)
+                    cover_mask[mask] = True
+
+            # augmentation and concat
+            view_dict = {}
+            for global_view in global_views:
+                if global_view is None:
+                    continue
+                global_view.pop("index")
+                global_view = self.global_transform(global_view)
+                for key in self.view_keys:
+                    if f"global_{key}" in view_dict.keys():
+                        view_dict[f"global_{key}"].append(global_view[key])
+                    else:
+                        view_dict[f"global_{key}"] = [global_view[key]]
+
+            if "global_coord" in view_dict and len(view_dict["global_coord"]) > 0:
+                view_dict["global_offset"] = np.cumsum(
+                    [data.shape[0] for data in view_dict["global_coord"]]
+                )
+
+            for local_view in local_views:
+                if local_view is None:
+                    continue
+                local_view.pop("index")
+                local_view = self.local_transform(local_view)
+                for key in self.view_keys:
+                    if f"local_{key}" in view_dict.keys():
+                        view_dict[f"local_{key}"].append(local_view[key])
+                    else:
+                        view_dict[f"local_{key}"] = [local_view[key]]
+
+            if "local_coord" in view_dict and len(view_dict["local_coord"]) > 0:
+                view_dict["local_offset"] = np.cumsum(
+                    [data.shape[0] for data in view_dict["local_coord"]]
+                )
+
+            for key in view_dict.keys():
+                if "offset" not in key and len(view_dict[key]) > 0:
+                    view_dict[key] = np.concatenate(view_dict[key], axis=0)
+
+            data_dict.update(view_dict)
+            return data_dict
+
+
+@TRANSFORMS.register_module()
+class DensityPerturbationViewGenerator(object):
+    def __init__(
+            self,
+            global_view_num=2,
+            global_view_size=(10.0, 30.0),
+            local_view_num=4,
+            local_view_size=(2.0, 10.0),
+            global_shared_transform=None,
+            global_transform=None,
+            local_transform=None,
+            max_size=65536,
+            center_height_scale=(0.2, 0.8),
+            shared_global_view=False,
+            view_keys=("coord", "origin_coord", "intensity"),
+            shape_type="cube",
+            # 密度扰动参数 - 简化为固定范围
+            density_perturbation=True,
+            density_perturbation_prob=0.8,
+            density_factor_range=(0.5, 2.0),  # 表示将点数调整到原数量的 50% 到 200%
+            grid_size=0.1, # 添加 grid_size 参数
     ):
-        # 保留原有初始化
+        # 基本参数初始化
         self.global_view_num = global_view_num
         self.global_view_size = global_view_size
         self.local_view_num = local_view_num
@@ -1577,15 +1817,73 @@ class DensityAdaptivePhysicalSizeMultiViewGenerator(object):
         self.view_keys = view_keys
         self.shape_type = shape_type
         assert "coord" in view_keys
-        
-        # 添加密度相关参数
-        self.density_variation = density_variation
-        self.density_aware_sampling = density_aware_sampling
-        self.target_density = target_density
-    
-    def estimate_local_density(self, coord, center, size):
-        """Estimate local point density around a center point"""
-        # 获取指定区域内的点
+
+        # 密度扰动参数
+        self.density_perturbation = density_perturbation
+        self.density_perturbation_prob = density_perturbation_prob
+        # self.density_variation = density_variation # 用 density_factor_range 替代
+        self.density_factor_range = density_factor_range
+        self.grid_size = grid_size
+
+
+    # 通过重复索引实现上采样
+    def simple_upsample(self, indices, num_to_add):
+        """非常简单的上采样：仅通过重复采样现有点索引来增加点数"""
+        if num_to_add <= 0 or len(indices) == 0:
+            return indices
+
+        # 通过有放回抽样增加索引数量，模拟上采样
+        additional_indices = np.random.choice(indices, num_to_add, replace=True)
+        return np.concatenate([indices, additional_indices])
+
+    def perturb_density(self, indices):
+        """实现密度扰动 - 使用简化的基于点数的策略"""
+        if not self.density_perturbation or np.random.rand() > self.density_perturbation_prob or len(indices) == 0:
+            # 如果超过最大点数，仍需处理
+            if len(indices) > self.max_size:
+                 return np.random.choice(indices, self.max_size, replace=False)
+            return indices
+
+        # --- 简化密度信息获取 ---
+        # 1. 获取视图内的点数
+        num_points = len(indices)
+
+        # --- 决定扰动策略 ---
+        # 随机选择密度变化因子 (相对于当前点数的比例)
+        density_factor = np.random.uniform(*self.density_factor_range)
+
+        # 计算目标点数
+        target_num_points = int(num_points * density_factor)
+        target_num_points = max(1, target_num_points) # 至少保留一个点
+
+        # 应用采样策略
+        if target_num_points < num_points:
+            # 下采样 (快速)
+            final_num_points = min(target_num_points, self.max_size)
+            return np.random.choice(indices, final_num_points, replace=False)
+
+        elif target_num_points > num_points:
+            # 上采样 (使用简单复制以提高速度)
+            num_to_add = target_num_points - num_points
+            max_addable = self.max_size - num_points
+            num_to_add = min(num_to_add, max_addable)
+
+            if num_to_add > 0:
+                # 使用简单的复制上采样
+                return self.simple_upsample(indices, num_to_add)
+            else:
+                return indices
+        else:
+            # 密度因子约为1，不改变点数，但仍需检查 max_size
+            if len(indices) > self.max_size:
+                return np.random.choice(indices, self.max_size, replace=False)
+            return indices
+
+    def get_view_by_size(self, point, center, size):
+        """获取基于物理尺寸的视图，包含密度扰动"""
+        coord = point["coord"]
+
+        # 计算距离中心点在指定物理尺寸范围内的点
         if self.shape_type == "cube":
             x_mask = np.abs(coord[:, 0] - center[0]) < size / 2
             y_mask = np.abs(coord[:, 1] - center[1]) < size / 2
@@ -1593,78 +1891,22 @@ class DensityAdaptivePhysicalSizeMultiViewGenerator(object):
         else:  # sphere
             distances = np.sqrt(np.sum((coord[:, :2] - center[:2]) ** 2, axis=1))
             mask = distances < size / 2
-            
-        local_points = coord[mask]
-        area = np.pi * (size / 2) ** 2 if self.shape_type == "sphere" else size ** 2
-        density = len(local_points) / area if area > 0 else 0
-        return density, mask
-    def density_aware_sample(self, indices, current_density, target_density, max_points=None):
-        """Sample points based on density to achieve target density"""
-        if not self.density_aware_sampling or current_density <= 0 or len(indices) == 0:
-            if max_points and len(indices) > max_points:
-                return np.random.choice(indices, max_points, replace=False)
-            return indices
-            
-        # 计算采样率：如果当前密度高于目标密度，则下采样；如果低于，则尝试保留所有点
-        sample_rate = min(1.0, target_density / current_density)
-        
-        # 如果需要下采样
-        if sample_rate < 1.0:
-            num_to_sample = int(len(indices) * sample_rate)
-            if max_points and num_to_sample > max_points:
-                num_to_sample = max_points
-            return np.random.choice(indices, num_to_sample, replace=False)
-        # 如果需要上采样（简单复制，实际应用中可能需要更复杂的上采样方法）
-        elif sample_rate > 1.0 and len(indices) < self.max_size:
-            num_to_add = min(int(len(indices) * (sample_rate - 1.0)), self.max_size - len(indices))
-            if num_to_add > 0 and max_points and len(indices) + num_to_add > max_points:
-                num_to_add = max_points - len(indices)
-            if num_to_add > 0:
-                additional_indices = np.random.choice(indices, num_to_add, replace=True)
-                return np.concatenate([indices, additional_indices])
-                
-        if max_points and len(indices) > max_points:
-            return np.random.choice(indices, max_points, replace=False)
-            
-        return indices
 
-    def get_view_by_size(self, point, center, size):
-        """Get view based on physical size with density adaptation"""
-        coord = point["coord"]
-        
-        # 1. 首先估计局部密度
-        current_density, mask = self.estimate_local_density(coord, center, size)
+
         indices = np.where(mask)[0]
-        
+
+        # 如果点太少，返回空视图
         if len(indices) == 0:
             return None
-            
-        # 2. 应用高度过滤
-        if coord.shape[1] >= 3:
-            z_values = coord[indices, 2]
-            z_min = np.min(z_values) if len(z_values) > 0 else 0
-            z_max = np.max(z_values) if len(z_values) > 0 else 0
-            z_range = z_max - z_min
-            z_min_ = z_min + z_range * self.center_height_scale[0]
-            z_max_ = z_min + z_range * self.center_height_scale[1]
-            z_mask = np.logical_and(coord[indices, 2] >= z_min_, coord[indices, 2] <= z_max_)
-            indices = indices[z_mask]
-            
-        if len(indices) == 0:
-            return None
-            
-        # 3. 密度感知采样 - 关键步骤
-        if self.density_variation and self.density_aware_sampling:
-            # 在训练时应用密度变化，模拟不同密度场景
-            density_factor = np.random.uniform(*self.density_variation)
-            target_density = self.target_density * density_factor
-            indices = self.density_aware_sample(indices, current_density, target_density, self.max_size)
-            
-        # 4. 确保不超过max_size
+
+        # 应用密度扰动 - 作为固定数据预处理
+        indices = self.perturb_density(indices)
+
+        # 确保不超过max_size (perturb_density 内部已处理，这里是双重保险)
         if len(indices) > self.max_size:
             indices = np.random.choice(indices, self.max_size, replace=False)
-            
-        # 5. 创建视图
+
+        # 创建视图
         view = dict(index=indices)
         for key in point.keys():
             if key in self.view_keys:
@@ -1672,9 +1914,142 @@ class DensityAdaptivePhysicalSizeMultiViewGenerator(object):
 
         if "index_valid_keys" in point.keys():
             view["index_valid_keys"] = point["index_valid_keys"]
-            
+
         return view
 
-    
+    def __call__(self, data_dict):
+        # 原始视图生成逻辑保持不变
+        coord = data_dict["coord"]
+        point = self.global_shared_transform(copy.deepcopy(data_dict))
 
+        # 创建高度掩码
+        z_min = coord[:, 2].min()
+        z_max = coord[:, 2].max()
+        z_min_ = z_min + (z_max - z_min) * self.center_height_scale[0]
+        z_max_ = z_min + (z_max - z_min) * self.center_height_scale[1]
+        center_mask = np.logical_and(coord[:, 2] >= z_min_, coord[:, 2] <= z_max_)
 
+        # 选择一个合理的中心点（避免边缘）
+        valid_indices = np.where(center_mask)[0]
+        if len(valid_indices) == 0:
+            return data_dict
+
+        # 确保中心点不在边缘
+        max_global_size = max(self.global_view_size)
+        edge_buffer = max_global_size / 2
+        x_min, y_min = np.min(coord[:, :2], axis=0)
+        x_max, y_max = np.max(coord[:, :2], axis=0)
+
+        # 过滤掉靠近边缘的点
+        edge_mask = np.logical_and(
+            np.logical_and(coord[:, 0] >= x_min + edge_buffer, coord[:, 0] <= x_max - edge_buffer),
+            np.logical_and(coord[:, 1] >= y_min + edge_buffer, coord[:, 1] <= y_max - edge_buffer)
+        )
+        center_mask = np.logical_and(center_mask, edge_mask)
+
+        valid_indices = np.where(center_mask)[0]
+        if len(valid_indices) == 0:
+            # 如果没有足够远离边缘的点，放宽条件
+            valid_indices = np.where(np.logical_and(coord[:, 2] >= z_min_, coord[:, 2] <= z_max_))[0]
+
+        if len(valid_indices) == 0:
+            return data_dict
+
+        # 获取主要全局视图
+        major_center = coord[np.random.choice(valid_indices)]
+        global_size = np.random.uniform(*self.global_view_size)
+        major_view = self.get_view_by_size(point, major_center, global_size)
+
+        if major_view is None:
+            return data_dict
+
+        major_coord = major_view["coord"]
+
+        # 获取其他全局视图
+        global_views = []
+        for _ in range(self.global_view_num - 1):
+            if major_coord.shape[0] == 0:
+                break
+            center_idx = np.random.randint(major_coord.shape[0])
+            center = major_coord[center_idx]
+            size = np.random.uniform(*self.global_view_size)
+            view = self.get_view_by_size(point, center, size)
+            if view is not None:
+                global_views.append(view)
+
+        if len(global_views) < self.global_view_num - 1:
+            # 如果无法生成足够的全局视图，用major_view填充
+            while len(global_views) < self.global_view_num - 1:
+                global_views.append({key: value.copy() for key, value in major_view.items()})
+
+        global_views = [major_view] + global_views
+
+        # 获取局部视图
+        cover_mask = np.zeros_like(major_view["index"], dtype=bool)
+        local_views = []
+        for i in range(self.local_view_num):
+            if sum(~cover_mask) == 0:
+                # 重置覆盖掩码
+                cover_mask[:] = False
+
+            if major_coord.shape[0] == 0:
+                break
+
+            # 优先选择未覆盖区域的点
+            available_indices = np.where(~cover_mask)[0]
+            if len(available_indices) == 0:
+                available_indices = np.arange(major_coord.shape[0])
+
+            center_idx = np.random.choice(available_indices)
+            center = major_coord[center_idx]
+            size = np.random.uniform(*self.local_view_size)
+            local_view = self.get_view_by_size(point, center, size)
+
+            if local_view is not None:
+                local_views.append(local_view)
+                # 更新覆盖掩码
+                local_indices = local_view["index"]
+                major_indices = major_view["index"]
+                mask = np.isin(major_indices, local_indices)
+                cover_mask[mask] = True
+
+        # 应用变换和拼接
+        view_dict = {}
+        for global_view in global_views:
+            if global_view is None:
+                continue
+            global_view.pop("index")
+            global_view = self.global_transform(global_view)
+            for key in self.view_keys:
+                if f"global_{key}" in view_dict.keys():
+                    view_dict[f"global_{key}"].append(global_view[key])
+                else:
+                    view_dict[f"global_{key}"] = [global_view[key]]
+
+        if "global_coord" in view_dict and len(view_dict["global_coord"]) > 0:
+            view_dict["global_offset"] = np.cumsum(
+                [data.shape[0] for data in view_dict["global_coord"]]
+            )
+
+        for local_view in local_views:
+            if local_view is None:
+                continue
+            local_view.pop("index")
+            local_view = self.local_transform(local_view)
+            for key in self.view_keys:
+                if f"local_{key}" in view_dict.keys():
+                    view_dict[f"local_{key}"].append(local_view[key])
+                else:
+                    view_dict[f"local_{key}"] = [local_view[key]]
+
+        if "local_coord" in view_dict and len(view_dict["local_coord"]) > 0:
+            view_dict["local_offset"] = np.cumsum(
+                [data.shape[0] for data in view_dict["local_coord"]]
+            )
+
+        for key in view_dict.keys():
+            if "offset" not in key and len(view_dict[key]) > 0:
+                view_dict[key] = np.concatenate(view_dict[key], axis=0)
+
+        data_dict.update(view_dict)
+        return data_dict

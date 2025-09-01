@@ -75,7 +75,7 @@ def default_argument_parser(epilog=None):
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--config-file", default="/home/Pointcept/configs/navarra/semseg-sonata-v1m1-0c-navarra-lora.py", metavar="FILE", help="path to config file"
+        "--config-file", default="/home/Pointcept/configs/navarra/semseg-sonata-v1m1-0a-navarra-lin.py", metavar="FILE", help="path to config file"
     )
     # "/home/Pointcept/configs/navarra/navarra_test.py" #  semseg-sonata-v1m1-0a-navarra-lin.py
     # "/home/Pointcept/configs/navarra/pretrain-sonata-v1m1-0-base-navarra.py"

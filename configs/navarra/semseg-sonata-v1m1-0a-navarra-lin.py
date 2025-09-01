@@ -8,14 +8,13 @@ clip_grad = 3.0  # ++++
 empty_cache = False
 enable_amp = True
 num_points_per_step = 65536
-weight = "/datasets/exp/model/model_best_dmh.pth"
-#weight = "/datasets/exp/model/model_last-cyf_ft.pth"
-# weight = "/datasets/exp/model/model_last-ep3.pth"  # path to model weight
-  # model_best_supervised.pth    model_last-ep3.pth
-grid_size = 1
-epoch = 2000
+# weight = "/datasets/exp/multi_view/models/model_last.pth"
+weight = "/datasets/exp/default/model/model_last.pth"
+grid_size = 0.1
+epoch = 200
 dataset_type = "NavarraDataset"
-data_root = "/datasets/navarra-test/"
+# data_root = "/datasets/ft_data/"
+data_root = "/datasets/internship/unused_land_data"
 # model settings
 model = dict(
     type="DefaultSegmentorV2",
@@ -97,7 +96,7 @@ data = dict(
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
             # dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
 
-            dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
+            # dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
             dict(type="ChromaticTranslation", p=0.95, ratio=0.05),
             dict(type="ChromaticJitter", p=0.95, std=0.05),
             # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
@@ -131,7 +130,7 @@ data = dict(
             dict(type="Copy", keys_dict={"segment": "origin_segment"}),
             dict(
                 type="GridSample",
-                grid_size=grid_size,
+                grid_size=grid_size*2,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -221,9 +220,9 @@ hooks = [
     dict(type="CheckpointSaver", save_freq=None),
     dict(type="PreciseEvaluator", test_last=False),
 ]
-test_only = True  # test process
+# test_only = True  # test process
 
-test_file = "/datasets/navarra-test2/raw/test/04.laz"
-grid_size=1.0
-#test = dict(type="EvaluateSSLModel", verbose=True, load_strict=False)
-test = dict(type="SemSegTester", verbose=True,load_strict=False)
+# test_file = "/datasets/navarra-test2/raw/test/04.laz"
+# grid_size=1.0
+# #test = dict(type="EvaluateSSLModel", verbose=True, load_strict=False)
+# test = dict(type="SemSegTester", verbose=True,load_strict=False)
