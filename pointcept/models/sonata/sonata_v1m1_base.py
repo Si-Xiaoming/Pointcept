@@ -223,7 +223,7 @@ class Sonata(PointModel):
             base_value=self.momentum_base,
             final_value=self.momentum_final,
             total_iters=total_steps,
-        )
+        )  # EMA
         self.momentum_scheduler.iter = curr_step
 
     def before_step(self):
@@ -232,6 +232,7 @@ class Sonata(PointModel):
         self.mask_ratio = self.mask_ratio_scheduler.step()
         self.teacher_temp = self.teacher_temp_scheduler.step()
         self.momentum = self.momentum_scheduler.step()
+        # 每个训练步骤前，从调度器获取当前参数值
 
         if self.trainer.writer is not None:
             self.trainer.writer.add_scalar(
