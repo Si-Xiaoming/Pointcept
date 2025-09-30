@@ -812,6 +812,7 @@ class GridSample(object):
         return_min_coord=False,
         return_displacement=False,
         project_displacement=False,
+        rand_scale=False
     ):
         self.grid_size = grid_size
         self.hash = self.fnv_hash_vec if hash_type == "fnv" else self.ravel_hash_vec
@@ -822,10 +823,16 @@ class GridSample(object):
         self.return_min_coord = return_min_coord
         self.return_displacement = return_displacement
         self.project_displacement = project_displacement
+        self.rand_scale = rand_scale
 
     def __call__(self, data_dict):
         assert "coord" in data_dict.keys()
-        scaled_coord = data_dict["coord"] / np.array(self.grid_size)
+        # scaled_coord = data_dict["coord"] / np.array(self.grid_size)
+        if self.rand_scale:
+            scale = np.random.uniform(0.1, 5)
+        else:
+            scale = 1.0
+        scaled_coord = data_dict["coord"] / (np.array(self.grid_size) * scale)
         grid_coord = np.floor(scaled_coord).astype(int)
         min_coord = grid_coord.min(0)
         grid_coord -= min_coord

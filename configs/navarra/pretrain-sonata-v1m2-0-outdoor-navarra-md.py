@@ -15,22 +15,23 @@ enable_amp = True # 控制是否在训练过程中使用混合精度计算
 amp_dtype = "bfloat16"  #enable_amp联动  bfloat16比float32节省50%内存
 evaluate = False
 find_unused_parameters = False
-num_points_per_step = 65536  # 65536
+num_points_per_step = 300  # 65536
 grid_size = 0.1 # 0.02
 dataset_type = "NavarraDataset"
-data_root = "/datasets/pretrain_data/"
+data_root = "/datasets/navarra-small/"
 save_path =  "/datasets/exp/pretrain_outdoor_01_ep2000_sonata_v1m2_md"
-
-
+# exp-0801\server_data\exp\default\model
+#weight = "/datasets/exp-0801/server_data/exp/default/model/epoch_5.pth"
+#resume = True
 # model settings
 model = dict(
     type="Sonata-v1m2-MD-Generic",
-    num_density_views=3,        # 生成3个不同密度视图
+    # num_density_views=3,        # 生成3个不同密度视图
     density_min_ratio=0.2,      # 最小为原始密度的20%
-    density_max_ratio=4.0,      # 最大为原始密度的400%
-    density_anisotropic_prob=0.4,  # 40%概率使用各向异性采样
-    cross_density_weight_start=0.2,
-    cross_density_weight=1.2,   # 密度一致性损失权重
+    density_max_ratio=3.0,      # 最大为原始密度的400%
+    # density_anisotropic_prob=0.4,  # 40%概率使用各向异性采样
+    #cross_density_weight_start=0.2,
+    # cross_density_weight=1.2,   # 密度一致性损失权重
     # backbone - student & teacher
     backbone=dict(
         type="PT-v3m2",

@@ -22,7 +22,8 @@ from pointcept.models.modules import PointModel
 from pointcept.models.utils import offset2batch, offset2bincount, batch2offset
 from pointcept.utils.comm import get_world_size, all_gather
 from pointcept.utils.scheduler import CosineScheduler
-from pointcept.models.sonata.sonata_v1m2_uni_teacher_head import Sonata
+# from pointcept.models.sonata.sonata_v1m2_uni_teacher_head import Sonata
+from pointcept.models.sonata.sonata_v1m1_base import Sonata
 
 
 import torch
@@ -34,10 +35,10 @@ from pointcept.models.modules import Point
 class GenericDensityAugmentor(nn.Module):
     def __init__(
             self,
-            num_density_views=3,  # 生成的密度视图数量
-            min_ratio=0.3,  # 最小相对密度比例（相对于原始密度）
-            max_ratio=3.0,  # 最大相对密度比例
-            prob_anisotropic=0.3  # 各向异性采样概率
+            num_density_views=2,  # 减少密度视图数量，从3减到2
+            min_ratio=0.3,
+            max_ratio=2.0,
+            prob_anisotropic=0.3
     ):
         super().__init__()
         self.num_views = num_density_views
@@ -60,13 +61,13 @@ class GenericDensityAugmentor(nn.Module):
             ratios = torch.rand(len(unique_batches), device=point.coord.device)
             ratios = ratios * (self.max_ratio - self.min_ratio) + self.min_ratio
 
-            # 各向异性采样（可选）：沿某个轴方向进行非均匀采样
+            # 各向异性采样（可选）
             if self.training and torch.rand(1) < self.prob_anisotropic:
                 sampled_indices = self._anisotropic_sample(point, batch, unique_batches, num_points_per_batch, ratios)
             else:
                 sampled_indices = self._isotropic_sample(point, batch, unique_batches, num_points_per_batch, ratios)
 
-            # 构建新密度视图
+            # 构建新密度视图 - 只保留必要的字段
             dense_view = Point({
                 "feat": point.feat[sampled_indices],
                 "coord": point.coord[sampled_indices],
@@ -92,11 +93,10 @@ class GenericDensityAugmentor(nn.Module):
 
             # 随机采样
             if num_sample >= len(indices_in_batch):
-                # 如果需要的点数大于等于原始点数，直接使用所有点
                 selected_indices = indices_in_batch
             else:
-                # 随机选择指定数量的点
-                rand_indices = torch.randperm(len(indices_in_batch), device=point.coord.device)[:num_sample]
+                # 使用更高效的随机采样方法
+                rand_indices = torch.randperm(len(indices_in_batch), device=point.coord.device, dtype=torch.int64)[:num_sample]
                 selected_indices = indices_in_batch[rand_indices]
 
             sampled_points.append(selected_indices)
@@ -104,13 +104,11 @@ class GenericDensityAugmentor(nn.Module):
         return torch.cat(sampled_points, dim=0)
 
     def _anisotropic_sample(self, point, batch, unique_batches, num_points_per_batch, ratios):
-        """各向异性采样：沿某一轴方向非均匀采样，模拟扫描线密度变化"""
+        """各向异性采样：沿某一轴方向非均匀采样"""
         sampled_points = []
-        # 随机选择一个轴（x/y/z）进行非均匀采样
         axis = torch.randint(0, 3, (1,)).item()
 
         for i, b in enumerate(unique_batches):
-            # 获取当前 batch 的所有点索引
             mask = batch == b
             indices_in_batch = torch.where(mask)[0]
             batch_points = point.coord[indices_in_batch]
@@ -121,27 +119,17 @@ class GenericDensityAugmentor(nn.Module):
 
             num_sample = max(50, int(ratios[i] * num_points_per_batch[b]))
 
-            # 非均匀采样：在轴方向上使用不同的采样间隔
-            if ratios[i] < 1.0:  # 降采样时，稀疏区域少采，密集区域多采
-                # 计算累积分布函数（CDF）实现非均匀采样
-                cdf = torch.linspace(0, 1, len(sorted_indices_local), device=point.coord.device)
-                cdf = cdf ** (1.0 / ratios[i])  # 调整采样密度曲线
-                sample_pos = torch.linspace(0, 1, num_sample, device=point.coord.device)
-                indices = torch.searchsorted(cdf, sample_pos).clamp(max=len(sorted_indices_local) - 1)
+            # 简化非均匀采样逻辑
+            if ratios[i] < 1.0:
+                # 降采样时使用均匀间隔采样
+                step = max(1, len(sorted_indices_local) // num_sample)
+                selected = sorted_indices_global[::step][:num_sample]
+            else:
+                # 升采样时使用重复采样
+                indices = torch.linspace(0, len(sorted_indices_local) - 1, num_sample,
+                                         device=point.coord.device, dtype=torch.int64)
+                indices = indices % len(sorted_indices_local)
                 selected = sorted_indices_global[indices]
-            else:  # 升采样时，在稀疏区域插值补充
-                if num_sample <= len(sorted_indices_local):
-                    # 如果采样数小于等于原始点数，直接均匀采样
-                    indices = torch.linspace(0, len(sorted_indices_local) - 1, num_sample,
-                                             device=point.coord.device).long()
-                    selected = sorted_indices_global[indices]
-                else:
-                    # 如果采样数大于原始点数，需要插值或重复采样
-                    # 简单实现：重复采样
-                    indices = torch.linspace(0, len(sorted_indices_local) - 1, num_sample,
-                                             device=point.coord.device).long()
-                    indices = indices % len(sorted_indices_local)
-                    selected = sorted_indices_global[indices]
 
             sampled_points.append(selected)
 
@@ -149,50 +137,74 @@ class GenericDensityAugmentor(nn.Module):
 
 
 @MODELS.register_module("Sonata-v1m2-MD-Generic")
-class SonataMultiDensityGeneric(Sonata):
+class SonataMultiDensityPointLevel(Sonata):
     def __init__(
             self,
             *args,
-            num_density_views=3,
-            density_min_ratio=0.3,
-            density_max_ratio=3.0,
-            density_anisotropic_prob=0.3,
-            cross_density_weight_start = 0.5,
-            cross_density_weight=1.0,
+            density_min_ratio=0.8,  # 初始扰动范围小
+            density_max_ratio=1.2,  # 初始扰动范围小
+            density_consistency_weight_start=0.01,  # 低初始权重
+            density_consistency_weight=0.2,  # 适度目标权重
+            density_radius=0.1,  # 局部区域半径
             **kwargs
     ):
         super().__init__(*args, **kwargs)
-        # 初始化通用密度增强器（不依赖绝对密度）
+
+        # 初始化密度扰动增强器
         self.density_aug = GenericDensityAugmentor(
-            num_density_views=num_density_views,
+            num_density_views=2,
             min_ratio=density_min_ratio,
-            max_ratio=density_max_ratio,
-            prob_anisotropic=density_anisotropic_prob
+            max_ratio=density_max_ratio
         )
-        self.cross_density_loss = CrossDensityLoss()
-        self.cross_density_weight = cross_density_weight
-        self.cross_density_weight_start = cross_density_weight_start
+
+        # 初始化点级别密度不变损失
+        self.density_consistency_loss = PointLevelDensityConsistencyLoss(
+            temp=0.1,
+            radius=density_radius
+        )
+
+        # 设置损失权重参数
+        self.density_consistency_weight = density_consistency_weight
+        self.density_consistency_weight_start = density_consistency_weight_start
 
     def before_train(self):
         super().before_train()
-        # 密度损失权重调度器
         total_steps = self.trainer.cfg.scheduler.total_steps
+
+        # 密度一致性损失权重调度器（缓慢增长）
         self.density_weight_scheduler = CosineScheduler(
-            start_value=self.cross_density_weight_start,
-            base_value=self.cross_density_weight,
-            final_value=self.cross_density_weight,
-            total_iters=total_steps
+            start_value=self.density_consistency_weight_start,
+            base_value=self.density_consistency_weight,
+            final_value=self.density_consistency_weight,
+            total_iters=total_steps * 0.5
+        )
+
+        # 密度扰动范围调度器（渐进式）
+        self.density_range_scheduler = CosineScheduler(
+            start_value=0.0,  # 无扰动
+            base_value=1.0,  # 完全达到目标扰动范围
+            final_value=1.0,
+            total_iters=int(total_steps * 0.3)
         )
 
     def before_step(self):
         super().before_step()
+        # 更新当前密度损失权重
         self.current_density_weight = self.density_weight_scheduler.step()
+
+        # 更新密度扰动范围
+        # if hasattr(self, 'density_range_scheduler'):
+        #     current_ratio = self.trainer.iter / self.trainer.max_iters
+        #     current_min_ratio = 1.0 - (1.0 - self.density_aug.min_ratio) * min(current_ratio / 0.3, 1.0)
+        #     current_max_ratio = 1.0 + (self.density_aug.max_ratio - 1.0) * min(current_ratio / 0.3, 1.0)
+        #     self.density_aug.min_ratio = current_min_ratio
+        #     self.density_aug.max_ratio = current_max_ratio
 
     def forward(self, data_dict, return_point=False):
         if return_point:
             return super().forward(data_dict, return_point)
 
-        # 1. 生成多密度视图（基于原始点云的相对密度）
+        # 1. 生成多密度视图
         global_point = Point(
             feat=data_dict["global_feat"],
             coord=data_dict["global_coord"],
@@ -205,117 +217,268 @@ class SonataMultiDensityGeneric(Sonata):
         # 2. 原有损失计算
         base_result = super().forward(data_dict)
 
-        # 3. 跨密度一致性损失计算
-        # with torch.no_grad():
-        #     teacher_feats = [
-        #         self.teacher.mask_head(self.up_cast(self.teacher.backbone(view)))
-        #         for view in density_views
-        #     ]
-        #
-        # student_feats = [
-        #     self.student.mask_head(self.up_cast(self.student.backbone(view)).feat)
-        #     for view in density_views
-        # ]
-        with torch.no_grad():
-            teacher_data_dict = [
-                # self.teacher.mask_head(self.up_cast(self.teacher.backbone(view)).feat)
-                self.up_cast(self.teacher.backbone(view))
-                for view in density_views
-            ]
-        student_data_dict = [
-            # self.student.mask_head(self.up_cast(self.student.backbone(view)).feat)
-            self.up_cast(self.student.backbone(view))
-            for view in density_views
-        ]
-        student_feats = [
-            student_data_dict[i]["feat"]
-            for i in range(len(density_views))
-        ]
-        teacher_feats = [
-            teacher_data_dict[i]["feat"]
-            for i in range(len(density_views))
-        ]
-        # 提取坐标信息用于匹配（可选）
-        student_coord_list = [
-            student_data_dict[i]["coord"]
-            for i in range(len(density_views))
-        ]
-        teacher_coord_list = [
-            teacher_data_dict[i]["coord"]
-            for i in range(len(density_views))
-        ]
-        # coord_list = [view.coord for view in density_views]
+        # 3. 密度不变损失计算
+        if self.training and len(density_views) > 1:
+            # 获取教师模型特征（作为稳定目标）
+            with torch.no_grad():
+                teacher_feats = []
+                teacher_coords = []
+                for view in density_views:
+                    teacher_out = self.up_cast(self.teacher.backbone(view))
+                    teacher_feats.append(teacher_out["feat"])
+                    teacher_coords.append(teacher_out["coord"])
 
-        # 计算不同密度视图间的特征一致性损失
-        cross_loss = self.cross_density_loss(student_feats, student_coord_list)
-        with torch.no_grad():
-            teacher_cross_loss = self.cross_density_loss(teacher_feats, teacher_coord_list)
-        cross_loss = (cross_loss + teacher_cross_loss) * 0.5
+            # 获取学生模型特征
+            student_feats = []
+            student_coords = []
+            for view in density_views:
+                student_out = self.up_cast(self.student.backbone(view))
+                student_feats.append(student_out["feat"])
+                student_coords.append(student_out["coord"])
 
-        # 4. 合并损失
-        base_result["cross_density_loss"] = cross_loss * self.current_density_weight
-        base_result["loss"] += base_result["cross_density_loss"]
+            # 计算点级别密度不变损失
+            density_loss = self.density_consistency_loss(
+                student_feats,
+                teacher_feats,
+                student_coords,
+                [view.offset for view in density_views]
+            )
+
+            # 合并到总损失
+            base_result["density_consistency_loss"] = density_loss
+            base_result["loss"] += density_loss * self.current_density_weight
 
         return base_result
+class PointLevelDensityConsistencyLoss(nn.Module):
+    def __init__(self, temp=0.1, radius=0.1, density_norm_power=0.5):
+        """
+        点级别密度不变语义一致性损失
 
+        Args:
+            temp: 对比学习温度参数
+            radius: 局部区域半径 (根据数据集调整，ScanNet建议0.1)
+            density_norm_power: 密度归一化指数 (0.5表示平方根归一化)
+        """
+        super().__init__()
+        self.temp = temp
+        self.radius = radius
+        self.density_norm_power = density_norm_power
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from pointcept.models.utils import offset2batch, batch2offset
-from pointcept.utils.comm import get_world_size, all_gather
-import pointops  # 导入pointops库
+        # 投影头，将特征映射到对比学习空间
+        self.projection_head = nn.Sequential(
+            nn.Linear(1088, 256),
+            nn.GELU(),
+            nn.Linear(256, 128)
+        )
+
+    def forward(self, student_feats, teacher_feats, coords, offsets=None):
+        """
+        计算点级别密度不变语义一致性损失
+
+        Args:
+            student_feats: 学生模型在不同密度视图的特征列表 [num_views, N_i, C]
+            teacher_feats: 教师模型在不同密度视图的特征列表 [num_views, N_i, C]
+            coords: 原始坐标列表 [num_views, N_i, 3]
+            offsets: 批次偏移列表 [num_views, B+1]
+
+        Returns:
+            密度一致性损失值
+        """
+        num_views = len(student_feats)
+        total_loss = 0.0
+        valid_pairs = 0
+
+        # 遍历所有视图对
+        for i in range(num_views):
+            for j in range(i + 1, num_views):
+                # 仅处理有效的视图对
+                if len(student_feats[i]) == 0 or len(student_feats[j]) == 0:
+                    continue
+
+                # 投影特征并归一化
+                student_proj_i = F.normalize(self.projection_head(student_feats[i]), dim=-1)
+                student_proj_j = F.normalize(self.projection_head(student_feats[j]), dim=-1)
+                teacher_proj_i = F.normalize(self.projection_head(teacher_feats[i]), dim=-1)
+                teacher_proj_j = F.normalize(self.projection_head(teacher_feats[j]), dim=-1)
+
+                # 计算视图i→j的密度不变损失
+                loss_ij = self._density_invariant_loss(
+                    student_proj_i, teacher_proj_j,
+                    coords[i], coords[j],
+                    offsets[i] if offsets else None,
+                    offsets[j] if offsets else None
+                )
+
+                # 计算视图j→i的密度不变损失
+                loss_ji = self._density_invariant_loss(
+                    student_proj_j, teacher_proj_i,
+                    coords[j], coords[i],
+                    offsets[j] if offsets else None,
+                    offsets[i] if offsets else None
+                )
+
+                total_loss += (loss_ij + loss_ji) * 0.5
+                valid_pairs += 1
+
+        return total_loss / max(1, valid_pairs)
+
+    def _density_invariant_loss(self, student_proj, teacher_proj,
+                                coord_s, coord_t, offset_s=None, offset_t=None):
+        """计算点级别密度不变损失"""
+        # 1. 处理offset缺失情况
+        if offset_s is None:
+            offset_s = torch.tensor([0, coord_s.size(0)], device=coord_s.device, dtype=torch.int32)
+        if offset_t is None:
+            offset_t = torch.tensor([0, coord_t.size(0)], device=coord_t.device, dtype=torch.int32)
+
+        # 2. 密度归一化局部特征聚合 (关键步骤)
+        density_invariant_s = self._density_normalized_aggregation(
+            student_proj, coord_s, offset_s
+        )
+        density_invariant_t = self._density_normalized_aggregation(
+            teacher_proj, coord_t, offset_t
+        )
+
+        # 3. 计算相似度矩阵
+        sim_matrix = torch.mm(density_invariant_s, density_invariant_t.t()) / self.temp
+
+        # 4. 生成软匹配标签 (基于几何邻近性)
+        with torch.no_grad():
+            # 计算点s到点t的最近邻距离
+            dist_matrix = self._compute_distance_matrix(coord_s, coord_t, offset_s, offset_t)
+
+            # 创建软标签：考虑多个潜在匹配点
+            _, topk_indices = torch.topk(-dist_matrix, k=min(3, dist_matrix.size(1)), dim=1)
+            labels = torch.zeros_like(sim_matrix)
+
+            # 为每个查询点分配权重
+            for i in range(dist_matrix.size(0)):
+                weights = F.softmax(-dist_matrix[i, topk_indices[i]], dim=0)
+                labels[i, topk_indices[i]] = weights
+
+        # 5. 计算对比损失
+        log_prob = F.log_softmax(sim_matrix, dim=1)
+        loss = -torch.sum(labels * log_prob, dim=1).mean()
+
+        return loss
+
+    def _density_normalized_aggregation(self, feat, coord, offset):
+        """密度归一化的局部特征聚合 (关键创新)"""
+        # 1. 为每个点查询局部球形邻域
+        idx, _ = pointops.knn_query(4, coord, offset, coord, offset)
+
+        # 2. 获取邻域特征
+        grouped_feat = pointops.grouping(idx.contiguous(), feat.contiguous(), coord.contiguous())
+
+        # 3. 密度归一化：根据邻域点数调整聚合权重
+        #valid_mask = (idx >= 0)
+        valid_mask = idx
+        num_points = valid_mask.sum(dim=1, keepdim=True).float()  # [N, 1]
+
+        # 关键：使用幂函数进行密度归一化 (0.5表示平方根归一化)
+        normalized_weights = valid_mask.float() / (num_points ** self.density_norm_power + 1e-6)
+
+        # 4. 密度加权聚合
+        density_invariant_feat = torch.sum(grouped_feat * normalized_weights.unsqueeze(-1), dim=1)
+
+        return density_invariant_feat
+
+    def _compute_distance_matrix(self, coord_s, coord_t, offset_s=None, offset_t=None):
+        """计算距离矩阵，考虑批次信息并修复维度不匹配问题"""
+        # 确保offset有效
+        if offset_s is None or len(offset_s) == 0:
+            offset_s = torch.tensor([0, coord_s.size(0)], device=coord_s.device, dtype=torch.int32)
+        if offset_t is None or len(offset_t) == 0:
+            offset_t = torch.tensor([0, coord_t.size(0)], device=coord_t.device, dtype=torch.int32)
+
+        # 创建正确的批次索引（避免使用可能有问题的offset2batch）
+        batch_s = torch.zeros(coord_s.size(0), dtype=torch.long, device=coord_s.device)
+        batch_t = torch.zeros(coord_t.size(0), dtype=torch.long, device=coord_t.device)
+
+        # 手动构建批次索引
+        for i in range(1, len(offset_s)):
+            start, end = offset_s[i - 1], offset_s[i]
+            if end > start:  # 确保有效范围
+                batch_s[start:end] = i - 1
+
+        for i in range(1, len(offset_t)):
+            start, end = offset_t[i - 1], offset_t[i]
+            if end > start:
+                batch_t[start:end] = i - 1
+
+        # 创建距离矩阵
+        dist_matrix = torch.zeros(coord_s.size(0), coord_t.size(0),
+                                  device=coord_s.device, dtype=coord_s.dtype)
+
+        # 处理每个批次
+        max_batch = max(batch_s.max().item(), batch_t.max().item()) + 1
+        for b in range(max_batch):
+            mask_s = (batch_s == b)
+            mask_t = (batch_t == b)
+
+            # 检查有效点
+            if mask_s.sum() == 0 or mask_t.sum() == 0:
+                continue
+
+            # 安全计算距离
+            try:
+                batch_dist = torch.cdist(coord_s[mask_s], coord_t[mask_t])
+                dist_matrix[mask_s][:, mask_t] = batch_dist
+            except Exception as e:
+                print(f"Error computing distance for batch {b}: {e}")
+                continue
+
+        return dist_matrix
+
 
 
 class CrossDensityLoss(nn.Module):
     """
-    跨密度视图特征一致性损失
-    通过动态匹配不同密度视图间的点，并计算特征相似性损失
-    基于pointops库实现高效的KNN查询
+    简化的跨密度视图特征一致性损失
+    减少计算复杂度和内存占用
     """
 
     def __init__(
             self,
             temp=0.1,
-            match_max_k=8,  # 每个点匹配的最大邻居数
-            sinkhorn_iter=3,
+            match_max_k=4,  # 减少KNN邻居数量，从8减到4
+            use_sinkhorn=False,  # 默认不使用Sinkhorn-Knopp算法
     ):
         super().__init__()
         self.temp = temp
-        self.match_max_k = match_max_k  # 每个点匹配的最大邻居数
-        self.sinkhorn_iter = sinkhorn_iter  # Sinkhorn-Knopp迭代次数
+        self.match_max_k = match_max_k
+        self.use_sinkhorn = use_sinkhorn
 
     def forward(self, feat_list, coord_list, offset_list=None):
         """
         Args:
-            feat_list: 不同密度视图的特征列表，每个元素形状为[N_i, C]
-            coord_list: 不同密度视图的坐标列表，每个元素形状为[N_i, 3]
-            offset_list: 不同密度视图的offset列表，每个元素形状为[B+1]，用于批次区分
+            feat_list: 不同密度视图的特征列表
+            coord_list: 不同密度视图的坐标列表
+            offset_list: 不同密度视图的offset列表
         Returns:
             跨密度视图一致性损失
         """
         total_loss = 0.0
         num_views = len(feat_list)
 
-        # 计算所有视图对之间的一致性损失
-        for i in range(num_views):
-            for j in range(i + 1, num_views):
-                # 获取当前视图对的offset（如果提供）
-                offset_i = offset_list[i] if offset_list is not None else None
-                offset_j = offset_list[j] if offset_list is not None else None
+        # 只计算相邻视图对之间的损失，减少计算量
+        for i in range(num_views - 1):
+            j = i + 1
+            offset_i = offset_list[i] if offset_list is not None else None
+            offset_j = offset_list[j] if offset_list is not None else None
 
-                loss_ij = self._view_pair_loss(
-                    feat_i=feat_list[i],
-                    coord_i=coord_list[i],
-                    feat_j=feat_list[j],
-                    coord_j=coord_list[j],
-                    offset_i=offset_i,
-                    offset_j=offset_j
-                )
-                total_loss += loss_ij
+            loss_ij = self._view_pair_loss(
+                feat_i=feat_list[i],
+                coord_i=coord_list[i],
+                feat_j=feat_list[j],
+                coord_j=coord_list[j],
+                offset_i=offset_i,
+                offset_j=offset_j
+            )
+            total_loss += loss_ij
 
         # 平均所有视图对的损失
-        return total_loss / (num_views * (num_views - 1) / 2)
+        return total_loss / max(1, num_views - 1)
 
     def _view_pair_loss(self, feat_i, coord_i, feat_j, coord_j, offset_i=None, offset_j=None):
         """计算两个视图之间的跨密度损失"""
@@ -323,72 +486,66 @@ class CrossDensityLoss(nn.Module):
         feat_i = F.normalize(feat_i, dim=1)
         feat_j = F.normalize(feat_j, dim=1)
 
-        # 为没有提供offset的情况自动生成（假设单批次）
+        # 为没有提供offset的情况自动生成
         if offset_i is None:
             offset_i = torch.tensor([0, coord_i.size(0)], device=coord_i.device, dtype=torch.int32)
         if offset_j is None:
             offset_j = torch.tensor([0, coord_j.size(0)], device=coord_j.device, dtype=torch.int32)
 
-        # 动态匹配两个视图中的点 - 使用pointops的knnquery
-        idx_j, dists_j = pointops.knn_query(
-            self.match_max_k,  # 邻居数量
-            coord_j.contiguous().float(),  # 目标点云
-            offset_j.contiguous().int(),  # 查询点云（从i查询j中的点）
-            coord_i.contiguous().float(),  # 目标点云的offset
-            offset_i.contiguous().int()   # 查询点云的offset
-        )  # idx_j: [N_i, K], dists_j: [N_i, K]
+        # 使用pointops进行KNN查询
+        idx_j, _ = pointops.knn_query(
+            self.match_max_k,
+            coord_j.contiguous().float(),
+            offset_j.contiguous().int(),
+            coord_i.contiguous().float(),
+            offset_i.contiguous().int()
+        )
 
-        # 获取匹配点的特征 (使用pointops的grouping函数)
-        feat_j_matched = pointops.grouping(idx_j.contiguous(), feat_j.contiguous(), coord_j.contiguous())  # [N_i, K, C]
+        # 获取匹配点的特征
+        feat_j_matched = pointops.grouping(idx_j.contiguous(), feat_j.contiguous(), coord_j.contiguous())
 
         # 计算特征相似性
-        sim_matrix = torch.einsum(
-            "nc,nkc->nk",
-            feat_i,
-            feat_j_matched
-        )  # [N_i, K]
+        sim_matrix = torch.einsum("nc,nkc->nk", feat_i, feat_j_matched)
         sim_matrix = sim_matrix / self.temp
 
-        # 使用Sinkhorn-Knopp算法计算最优匹配
-        q_i = self.sinkhorn_knopp(sim_matrix, temp=1.0)  # [N_i, K]
+        # 简化匹配策略：使用softmax直接匹配
+        if self.use_sinkhorn:
+            q_i = self.sinkhorn_knopp(sim_matrix, temp=1.0)
+        else:
+            q_i = F.softmax(sim_matrix, dim=1)
 
         # 计算InfoNCE损失
         loss_i = -torch.log(torch.sum(q_i * F.softmax(sim_matrix, dim=1), dim=1) + 1e-12)
         loss_i = loss_i.mean()
 
         # 对称计算损失（j->i）
-        idx_i, dists_i = pointops.knn_query(
-            self.match_max_k,  # 邻居数量
-            coord_i.contiguous(),  # 目标点云
-            offset_i.contiguous(),  # 查询点云（从j查询i中的点）
-            coord_j.contiguous(),  # 目标点云的offset
-            offset_j.contiguous()   # 查询点云的offset
-        )  # idx_i: [N_j, K], dists_i: [N_j, K]
-
-        # 获取匹配点的特征
+        idx_i, _ = pointops.knn_query(
+            self.match_max_k,
+            coord_i.contiguous().float(),
+            offset_i.contiguous().int(),
+            coord_j.contiguous().float(),
+            offset_j.contiguous().int()
+        )
 
         feat_i_matched = pointops.grouping(idx_i.contiguous(), feat_i.contiguous(), coord_i.contiguous())
-        # 计算特征相似性
-        sim_matrix_j = torch.einsum(
-            "nc,nkc->nk",
-            feat_j,
-            feat_i_matched
-        )  # [N_j, K]
+        sim_matrix_j = torch.einsum("nc,nkc->nk", feat_j, feat_i_matched)
         sim_matrix_j = sim_matrix_j / self.temp
 
-        q_j = self.sinkhorn_knopp(sim_matrix_j, temp=1.0)
+        if self.use_sinkhorn:
+            q_j = self.sinkhorn_knopp(sim_matrix_j, temp=1.0)
+        else:
+            q_j = F.softmax(sim_matrix_j, dim=1)
+
         loss_j = -torch.log(torch.sum(q_j * F.softmax(sim_matrix_j, dim=1), dim=1) + 1e-12)
         loss_j = loss_j.mean()
 
         return (loss_i + loss_j) * 0.5
 
     @staticmethod
-    def sinkhorn_knopp(feat, temp=1.0, num_iter=3):
-        """Sinkhorn-Knopp算法用于计算最优传输矩阵"""
+    def sinkhorn_knopp(feat, temp=1.0, num_iter=2):  # 减少迭代次数
+        """简化的Sinkhorn-Knopp算法"""
         feat = feat.float()
         q = torch.exp(feat / temp).t()  # [K, N]
-        n = sum(all_gather(q.shape[1]))  # 全局样本数
-        k = q.shape[0]  # 原型数
 
         # 归一化
         sum_q = q.sum()
@@ -407,4 +564,4 @@ class CrossDensityLoss(nn.Module):
             sum_c = torch.sum(q, dim=0, keepdim=True)
             q = q / sum_c
 
-        return q.t()  # [N, K]
+        return q.t()

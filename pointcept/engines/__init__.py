@@ -1,1 +1,1 @@
-from .test_laz import SemSegTesterLaz
+from .test_laz import LAZSemiSegTester
