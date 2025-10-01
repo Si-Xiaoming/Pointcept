@@ -24,12 +24,11 @@ from pointcept.utils.misc import (
 
 import pointops
 
-
 # 添加PDAL依赖
 
 import pdal
 from sklearn.neighbors import KDTree
-from pointcept.engines.test import TesterBase,TESTERS
+from pointcept.engines.test import TesterBase, TESTERS
 
 
 @TESTERS.register_module()
@@ -76,10 +75,19 @@ class LAZSemiSegTesterSimple(TesterBase):
         """合并所有块的预测结果"""
         self.logger.info("Merging predictions from all blocks...")
 
-        if not hasattr(dataset, 'num_total_points'):
-            raise RuntimeError("Dataset does not have num_total_points attribute")
+        # 获取处理后的数据大小（基于processed_coord）
+        if hasattr(dataset, 'processed_coord') and dataset.processed_coord is not None:
+            num_points = dataset.processed_coord.shape[0]
+            self.logger.info(f"Using processed_coord size: {num_points} points")
+        elif hasattr(dataset, 'num_total_points'):
+            num_points = dataset.num_total_points
+            self.logger.info(f"Using num_total_points: {num_points} points")
+        elif hasattr(dataset, 'current_arrays'):
+            num_points = len(dataset.current_arrays)
+            self.logger.info(f"Using current_arrays size: {num_points} points")
+        else:
+            raise RuntimeError("Dataset does not have valid size information")
 
-        num_points = dataset.num_total_points
         num_classes = self.cfg.data.num_classes
 
         # 初始化概率数组
@@ -101,7 +109,18 @@ class LAZSemiSegTesterSimple(TesterBase):
                 continue
 
             pred_np = pred.data.cpu().numpy()
-            pred_probs[indices] += pred_np
+
+            # 确保形状匹配
+            if pred_np.ndim == 1:
+                # 如果是标签格式，转换为概率格式
+                pred_prob_np = np.zeros((len(pred_np), num_classes), dtype=np.float32)
+                for i, label in enumerate(pred_np):
+                    if 0 <= label < num_classes:
+                        pred_prob_np[i, label] = 1.0
+            else:
+                pred_prob_np = pred_np
+
+            pred_probs[indices] += pred_prob_np
             pred_counts[indices] += 1
 
         # 处理未预测的点
@@ -147,7 +166,9 @@ class LAZSemiSegTesterSimple(TesterBase):
         }
 
         # 添加空间参考
-        if hasattr(dataset, 'current_metadata') and 'comp_spatialreference' in dataset.current_metadata['readers.las']:
+        if hasattr(dataset,
+                   'current_metadata') and 'readers.las' in dataset.current_metadata and 'comp_spatialreference' in \
+                dataset.current_metadata['readers.las']:
             las_kwargs['a_srs'] = dataset.current_metadata['readers.las']['comp_spatialreference']
 
         pipeline |= pdal.Writer.las(filename=output_path, **las_kwargs)
@@ -199,7 +220,18 @@ class LAZSemiSegTesterSimple(TesterBase):
                 continue
 
             # 确保索引在有效范围内
-            valid_mask = block_indices < len(dataset.current_arrays)
+            # 获取正确的数据大小
+            if hasattr(dataset, 'processed_coord') and dataset.processed_coord is not None:
+                data_size = dataset.processed_coord.shape[0]
+            elif hasattr(dataset, 'num_total_points'):
+                data_size = dataset.num_total_points
+            elif hasattr(dataset, 'current_arrays'):
+                data_size = len(dataset.current_arrays)
+            else:
+                self.logger.warning(f"Cannot determine data size for block {block_idx}")
+                continue
+
+            valid_mask = block_indices < data_size
             if not torch.all(valid_mask):
                 invalid_count = torch.sum(~valid_mask)
                 self.logger.warning(f"Found {invalid_count} invalid indices in block {block_idx}, filtering...")
@@ -215,13 +247,8 @@ class LAZSemiSegTesterSimple(TesterBase):
             # 进行多轮投票
             for vote_round in range(self.vote_rounds):
                 # 准备输入数据（每轮使用不同的随机增强）
-                # input_dict = {}
-                # input_dict["coord"] = data_dict["coord"].copy()
-                # input_dict["color"] = data_dict["color"].copy() if "color" in data_dict else None
-                #
-                #
+                input_dict = data_dict['data'].copy()
 
-                input_dict = data_dict['data']
                 # 转换为CUDA张量
                 for key in input_dict.keys():
                     if input_dict[key] is not None:
@@ -255,7 +282,8 @@ class LAZSemiSegTesterSimple(TesterBase):
             # 存储块预测结果（使用概率形式用于后续合并）
             pred_probs = np.zeros((len(final_pred), self.cfg.data.num_classes), dtype=np.float32)
             for i, label in enumerate(final_pred):
-                pred_probs[i, label] = 1.0 / len(vote_results) * len(vote_results)  # 平均概率
+                if 0 <= label < self.cfg.data.num_classes:
+                    pred_probs[i, label] = 1.0
 
             predictions_dict[block_idx] = (torch.tensor(pred_probs).cuda(), block_indices)
 
@@ -279,11 +307,42 @@ class LAZSemiSegTesterSimple(TesterBase):
         if hasattr(dataset, 'current_segment') and dataset.current_segment is not None:
             logger.info("Calculating overall accuracy metrics...")
 
+            # 获取处理后的数据大小
+            if hasattr(dataset, 'processed_coord') and dataset.processed_coord is not None:
+                processed_size = dataset.processed_coord.shape[0]
+            else:
+                processed_size = len(pred_labels)
+
+            # 获取原始标签大小
+            segment_size = len(dataset.current_segment)
+
+            logger.info(f"Processed data size: {processed_size}, Original segment size: {segment_size}")
+
+            # 处理大小不匹配的情况
+            if processed_size != segment_size:
+                logger.warning(f"Data size mismatch! Processed: {processed_size}, Segment: {segment_size}")
+                logger.warning("This may be due to transform operations like voxel downsampling")
+
+                # 检查是否有处理后的标签
+                if hasattr(dataset, 'processed_segment'):
+                    logger.info("Using processed_segment for accuracy calculation")
+                    segment_data = dataset.processed_segment
+                else:
+                    logger.warning("No processed_segment found, cannot calculate accurate metrics")
+                    # 这里可以选择：
+                    # 1. 跳过精度计算
+                    # 2. 使用原始标签但可能不准确
+                    # 3. 尝试其他方法匹配数据
+                    segment_data = dataset.current_segment[:processed_size]  # 截断到相同大小
+                    logger.warning(f"Truncated segment to {len(segment_data)} points for compatibility")
+            else:
+                segment_data = dataset.current_segment
+
             # 过滤忽略标签
-            valid_mask = dataset.current_segment != self.cfg.data.ignore_index
+            valid_mask = segment_data != self.cfg.data.ignore_index
             if np.any(valid_mask):
                 pred_labels_valid = pred_labels[valid_mask]
-                segment_valid = dataset.current_segment[valid_mask]
+                segment_valid = segment_data[valid_mask]
 
                 intersection, union, target = intersection_and_union(
                     pred_labels_valid, segment_valid,
@@ -334,7 +393,8 @@ class LAZSemiSegTesterSimple(TesterBase):
             'pred_labels': pred_labels,
             'pred_probs': pred_probs,
             'output_laz_path': output_laz_path,
-            'num_points': dataset.num_total_points,
+            'num_points': dataset.num_total_points if hasattr(dataset, 'num_total_points') else len(
+                dataset.current_arrays),
             'num_blocks': num_blocks,
             'vote_rounds': self.vote_rounds,
             'mIoU': mIoU if 'mIoU' in locals() else None,
