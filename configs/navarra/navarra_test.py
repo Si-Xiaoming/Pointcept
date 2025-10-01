@@ -12,14 +12,13 @@ num_points_per_block = 65536
 weight = "/datasets/exp/default-1.0/model/model_best.pth"  # path to model weight
 save_path = "/datasets/exp/outputs"
   # model_best_supervised.pth     model_last-ep3.pth
-test_file = "/datasets/navarra-test2/raw/test/04.laz"
 grid_size=0.1
 overlap_ratio = 0.1  # 块之间的重叠比例
 
 
 # dataset settings
-dataset_type = "LAZDataset"
-laz_file="/datasets/navarra-small/raw/test/04.laz"
+dataset_type = "LAZDatasetVote"
+laz_file="/datasets/navarra-small/raw/test/0401.laz"
 
 # model settings
 model = dict(
@@ -102,6 +101,20 @@ data = dict(
         transform=[
             dict(type="CenterShift", apply_z=True),
             # dict(type="NormalizeColor"),
+            dict(
+                type="GridSample",
+                grid_size=grid_size,
+                hash_type="fnv",
+                mode="train",
+                return_grid_coord=True,
+                return_inverse=True,
+            ),
+            dict(type="ToTensor"),
+            dict(
+                type="Collect",
+                keys=("coord", "grid_coord", "color", "inverse", "segment"),
+                feat_keys=("coord", "color"),
+            )
         ],
         test_mode=True,
         test_cfg=dict(
@@ -109,7 +122,7 @@ data = dict(
                 type="GridSample",
                 grid_size=grid_size,
                 hash_type="fnv",
-                mode="test",
+                mode="train",
                 # keys=("coord", "color"),
                 return_grid_coord=True,
             ),
@@ -154,4 +167,4 @@ hooks = [
 
 # tester settings
 test = dict(
-    type="LAZSemiSegTester")
+    type="LAZSemiSegTesterSimple")

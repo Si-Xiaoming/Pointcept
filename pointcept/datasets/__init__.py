@@ -26,4 +26,4 @@ from .dataloader import MultiDatasetDataloader
 # LAS data
 
 from .navarra import NavarraDataset
-from .PredictDataset import LAZDataset
+from .PredictDataset import LAZDatasetVote

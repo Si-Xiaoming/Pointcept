@@ -1,1 +1,1 @@
-from .test_laz import LAZSemiSegTester
+from .test_laz import LAZSemiSegTesterSimple
